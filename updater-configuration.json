@@ -1,0 +1,24 @@
+{
+  "services": [
+    {
+      "imageName": "prom/prometheus",
+      "enabled": true,
+      "targetTag": "latest"
+    },
+    {
+      "imageName": "dpage/pgadmin4",
+      "enabled": true,
+      "targetTag": "latest"
+    },
+    {
+      "imageName": "grafana/grafana",
+      "enabled": true,
+      "targetTag": "latest"
+    }
+  ],
+  "genericSettings": {
+    "hour": 23,
+    "minute": 30,
+    "pruneOldImages": false
+  }
+}
