@@ -1,0 +1,28 @@
+services:
+  # Group 1: Monitoring Stack
+  prometheus:
+    image: prom/prometheus
+    container_name: test-prometheus
+    labels:
+      - "com.update.group=monitoring"
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: test-grafana
+    labels:
+      - "com.update.group=monitoring"
+    ports:
+      - "3000:3000"
+
+  db-admin:
+    image: dpage/pgadmin4:7.0
+    container_name: test-pgadmin
+    labels:
+      - "com.update.group=database"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@test.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
