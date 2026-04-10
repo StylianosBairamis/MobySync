@@ -1,6 +1,7 @@
 using System.Text.Json;
 using docker_image_updater;
 using docker_image_updater.Data.Models;
+using docker_image_updater.Dtos;
 using docker_image_updater.Helpers;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,6 +9,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 var apiSection = builder.Configuration.GetRequiredSection(nameof(ApiSection))
                                 .Get<ApiSection>();
+
+var userApiKey = Environment.GetEnvironmentVariable("API_KEY");
+
+if (string.IsNullOrEmpty(userApiKey))
+{
+    Console.WriteLine($"API_KEY variable is not set, exiting...");
+
+    Environment.Exit(1);
+}
 
 if (apiSection is null)
 {
@@ -63,9 +73,9 @@ builder.Services.AddHostedService<UpdateService>();
 
 var app = builder.Build();
 
-app.MapPost("/api/update/trigger", async ([FromHeader(Name = "X-Api-Key")] string apiKey, UpdateCoordinator updateCoordinator) =>
+app.MapPost("/api/update/trigger", async ([FromBody] UpdateTriggerDto updateTriggerDto, UpdateCoordinator updateCoordinator) =>
 {
-    if (apiKey != apiSection.ApiKey) 
+    if (updateTriggerDto.ApiKey != userApiKey) 
     {
         return Results.Unauthorized();
     }

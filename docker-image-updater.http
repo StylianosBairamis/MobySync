@@ -1,6 +1,10 @@
-@docker_image_updater_HostAddress = http://localhost:5042
+@baseUrl= http://localhost:5040
+@apiKey = super-secret-key
 
-GET {{docker_image_updater_HostAddress}}/weatherforecast/
+POST {{baseUrl}}/api/update/trigger
 Accept: application/json
+Content-Type: application/json
 
-###
+{
+  "apiKey": "{{apiKey}}"
+}
