@@ -85,10 +85,12 @@ public class DockerHelper
     {
         foreach (var container in monitoredContainers)
         {
+            var baseImageName = FetchBaseImageName(container.Image);
+                
             var serviceConfig = _updaterConfiguration.Services
-                .FirstOrDefault(service => container.Image.StartsWith(service.ImageName));
+                .FirstOrDefault(service => service.ImageName.Equals(baseImageName, StringComparison.OrdinalIgnoreCase));
 
-            if (serviceConfig == null)
+            if (serviceConfig is null)
             {
                 return false;
             }
