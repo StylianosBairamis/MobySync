@@ -1,17 +1,17 @@
-using docker_image_updater;
-using docker_image_updater.Data.Models;
 using docker_image_updater.Extensions;
 using docker_image_updater.Filters;
 using docker_image_updater.Helpers;
+using docker_image_updater.Models;
 using docker_image_updater.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Register Services
-builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
-builder.Services.AddSingleton(service => service.GetRequiredService<IConfigurationService>().GetConfiguration());
+builder.Services.AddSingleton<ConfigurationHelper>();
+builder.Services.AddSingleton(service => service.GetRequiredService<ConfigurationHelper>().GetConfiguration());
 builder.Services.AddSingleton<DockerHelper>();
 builder.Services.AddSingleton<UpdateCoordinator>();
+builder.Services.AddSingleton<CredentialsHelper>();
 
 builder.Services.AddHostedService<UpdateService>();
 

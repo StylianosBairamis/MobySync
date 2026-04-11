@@ -1,4 +1,4 @@
-using docker_image_updater.Data.Models;
+using docker_image_updater.Models;
 
 namespace docker_image_updater.Dtos;
 

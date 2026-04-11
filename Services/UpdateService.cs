@@ -1,9 +1,9 @@
-using docker_image_updater.Data.Models;
 using docker_image_updater.Helpers;
+using docker_image_updater.Models;
 
-namespace docker_image_updater;
+namespace docker_image_updater.Services;
 
-public class UpdateService(UpdaterConfiguration updaterConfiguration, UpdateCoordinator updateCoordinator  , ILogger<UpdateService> logger) : BackgroundService
+public class UpdateService(UpdaterConfiguration updaterConfiguration, UpdateCoordinator updateCoordinator, ILogger<UpdateService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
@@ -14,6 +14,7 @@ public class UpdateService(UpdaterConfiguration updaterConfiguration, UpdateCoor
             var scheduledTimeUtc = nowUtc.Date.AddHours(updaterConfiguration.GenericSettings.Hour)
                                     .AddMinutes(updaterConfiguration.GenericSettings.Minute);
         
+            // If the set time is past the current, schedule it for next day.
             if (nowUtc > scheduledTimeUtc)
             {
                 scheduledTimeUtc = scheduledTimeUtc.AddDays(1);

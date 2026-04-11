@@ -4,7 +4,4 @@
 POST {{baseUrl}}/api/update/trigger
 Accept: application/json
 Content-Type: application/json
-
-{
-  "apiKey": "{{apiKey}}"
-}
+X-API-KEY: super-secret-key

@@ -1,7 +1,6 @@
-using docker_image_updater.Data.Models;
 using docker_image_updater.Dtos;
 using docker_image_updater.Helpers;
-using docker_image_updater.Services;
+using docker_image_updater.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace docker_image_updater.Extensions;
@@ -19,9 +18,9 @@ public static class RouteExtensions
                 : Results.Conflict(new { status = "An update process is already running" });
         });
 
-        endpoints.MapPut("/configuration", async ([FromBody] UpdateConfigurationDto updateConfigDto, IConfigurationService configService) =>
+        endpoints.MapPut("/configuration", async ([FromBody] UpdateConfigurationDto updateConfigDto, ConfigurationHelper configurationHelper) =>
         {
-            var currentConfig = configService.GetConfiguration();
+            var currentConfig = configurationHelper.GetConfiguration();
             
             var newConfig = new UpdaterConfiguration
             {
@@ -29,17 +28,17 @@ public static class RouteExtensions
                 GenericSettings = updateConfigDto.GenericSettings ?? currentConfig.GenericSettings
             };
 
-            if (!configService.Validate(newConfig, out string errorMessage))
+            if (!configurationHelper.Validate(newConfig, out string errorMessage))
             {
                 return Results.BadRequest(new { error = errorMessage });
             }
 
-            await configService.UpdateConfiguration(newConfig);
+            await configurationHelper.UpdateConfiguration(newConfig);
             
             return Results.Ok(newConfig);
         });
 
-        endpoints.MapGet("/configuration", (IConfigurationService configService) => 
+        endpoints.MapGet("/configuration", (ConfigurationHelper configService) => 
         {
             return Results.Ok(configService.GetConfiguration());
         });
