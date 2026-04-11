@@ -23,3 +23,9 @@ services:
       - "com.update.depends-on=grafana"
     ports:
       - "8080:80"
+
+  updater:
+    image: updater-test
+    container_name: docker-updater
+    environment:
+      API_KEY: test
