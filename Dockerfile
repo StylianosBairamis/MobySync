@@ -15,17 +15,6 @@ WORKDIR /app
 
 COPY --from=build /app .
 
-ARG UID=10001
+EXPOSE 5080
 
-RUN adduser \
-    -D \
-    -g "" \
-    -h "/nonexistent" \
-    -s "/sbin/nologin" \
-    -H \
-    -u "${UID}" \
-    appuser
-    
-USER appuser
-
-ENTRYPOINT ["dotnet", "docker-image-updater.dll"]
+ENTRYPOINT ["dotnet", "MobySync.dll"]

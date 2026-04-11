@@ -1,56 +1,13 @@
 services:
-  prometheus:
-    image: prom/prometheus
-    container_name: prometheus
+  moby-sync:
+    image: moby-sync:latest
+    container_name: moby-sync
+    restart: unless-stopped
     ports:
-      - "9090:9090"
-
-  grafana:
-    image: grafana/grafana:10.0.0
-    container_name: grafana
-    labels:
-      - "com.update.depends-on=prometheus"
-    ports:
-      - "3000:3000"
-
-  pg-admin:
-    image: dpage/pgadmin4:7.0
-    container_name: pgadmin
+      - "5080:5080"
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@test.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    labels:
-      - "com.update.depends-on=grafana"
-    ports:
-      - "8080:80"
-
-  postgres-db:
-    image: postgres:15
-    container_name: postgres-db
-    environment:
-      POSTGRES_PASSWORD: secretpassword
-
-  redis-cache:
-    image: redis:7
-    container_name: redis-cache
-
-  backend-api:
-    image: node:18-alpine
-    container_name: backend-api
-    command: "node -e 'console.log(\"Running...\"); setInterval(()=>{}, 1000);'"
-    labels:
-      - "com.update.depends-on=postgres-db,redis-cache"
-    ports:
-      - "5000:5000"
-
-  nginx-proxy:
-    image: nginx:latest
-    container_name: nginx-proxy
-    ports:
-      - "80:80"
-
-  whoami-service:
-    image: traefik/whoami
-    container_name: whoami-service
-    ports:
-      - "8081:80"
+      API_KEY: "super-secret-key"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock      
+      - ~/.docker/config.json:/creds/config.json:ro
+      - ./appsettings.json:/app/appsettings.json

@@ -132,3 +132,7 @@ $RECYCLE.BIN/
 
 _NCrunch*
 .idea
+
+todo.md
+compose.testing.yml
+appsettings.json
