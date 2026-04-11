@@ -25,24 +25,35 @@ public class DockerHelper
     
     public async Task CheckForImageUpdates()
     {
-        var monitoredContainers = await GetMonitoredContainers();
-        
-        if (monitoredContainers == null || !monitoredContainers.Any())
-            return;
-
-        _logger.LogInformation("Update Execution Order: {Order}", 
-            string.Join(" -> ", monitoredContainers.Select(c => c.Names.First().Replace("/", ""))));
-
-        var successfulOperation = await PullImages(monitoredContainers);
-
-        if (!successfulOperation)
-            return;
-        
-        await ReplaceContainers(monitoredContainers);
-        
-        if (_updaterConfiguration.GenericSettings.PruneOldImages)
+        try
         {
-            await _dockerClient.Images.PruneImagesAsync(new ImagesPruneParameters());
+            var monitoredContainers = await GetMonitoredContainers();
+        
+            if (monitoredContainers is null)
+                return;
+        
+            var containersGroups = GroupDependentContainers(monitoredContainers);
+
+            foreach (var containerGroup in containersGroups)
+            {
+                var successfulOperation = await PullImages(containerGroup.Value);
+
+                if (!successfulOperation)
+                    return;
+                _logger.LogInformation("Update Execution Order: {Order}", 
+                    string.Join(" -> ", containerGroup.Value.Select(container => container.Names.First().Replace("/", ""))));
+        
+                await ReplaceContainers(containerGroup.Value);
+            }
+
+            if (_updaterConfiguration.GenericSettings.PruneOldImages)
+            {
+                await _dockerClient.Images.PruneImagesAsync(new ImagesPruneParameters());
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "An unexpected error occurred while trying to update the monitored containers.");
         }
     }
     
@@ -71,16 +82,70 @@ public class DockerHelper
             })
             .ToList();
 
-        if (!monitoredContainers.Any())
-        {
-            _logger.LogInformation("No desired containers were found in running state.");
-            
-            return null;
-        }
+        if (monitoredContainers.Any()) 
+            return monitoredContainers;
         
-        return SortByDependencies(monitoredContainers);
+        _logger.LogInformation("No desired containers were found in running state.");
+            
+        return null;
     }
+    
+    private Dictionary<string, List<ContainerListResponse>> GroupDependentContainers(IEnumerable<ContainerListResponse> monitoredContainers)
+    {
+        var containerMap = monitoredContainers.ToDictionary(
+            container => container.Names.First().Replace("/", ""),
+            container => container);
+        
+        var adjacencyList = new Dictionary<string, HashSet<string>>();
+        
+        foreach (var name in containerMap.Keys)
+        {
+            adjacencyList[name] = new HashSet<string>();
+        }
 
+        var visited = new HashSet<string>();
+        
+        var groupedDictionary = new Dictionary<string, List<ContainerListResponse>>();
+        
+        var groupCounter = 1;
+
+        foreach (var nodeName in containerMap.Keys)
+        {
+            if (!visited.Contains(nodeName))
+            {
+                var currentGroupNames = new List<string>();
+            
+                ExploreNode(nodeName, currentGroupNames);
+
+                var containersGroup = currentGroupNames.Select(name => containerMap[name])
+                                                                            .ToList();
+                
+                var sortedGroup = SortContainersByDependencies(containersGroup);
+            
+                groupedDictionary.Add($"Auto-Group-{groupCounter}", sortedGroup);
+                
+                groupCounter++;
+            }
+        }
+
+        return groupedDictionary;
+        
+        void ExploreNode(string current, List<string> group)
+        {
+            visited.Add(current);
+            
+            group.Add(current);
+
+            foreach (var neighbor in adjacencyList[current])
+            {
+                if (!visited.Contains(neighbor))
+                {
+                    ExploreNode(neighbor, group);
+                }
+            }
+        }
+    }
+    
     private async Task<bool> PullImages(IEnumerable<ContainerListResponse> monitoredContainers)
     {
         foreach (var container in monitoredContainers)
@@ -102,8 +167,21 @@ public class DockerHelper
                     FromImage = serviceConfig.ImageName,
                     Tag = serviceConfig.TargetTag
                 }, new AuthConfig(), new Progress<JSONMessage>());
+                
+                var pulledImageInformation = await _dockerClient.Images.InspectImageAsync(baseImageName);
 
-                _logger.LogInformation("Successfully pulled new image: {Image}", serviceConfig.ImageName);
+                var pulledImageId = pulledImageInformation.ID;
+                
+                var runningImageId = container.ImageID;
+
+                if (runningImageId != pulledImageId)
+                {
+                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}", serviceConfig.ImageName, pulledImageId);
+                }
+                else
+                {
+                    _logger.LogInformation("Container {Container} is already running the latest version of {Image}", container.Names.First(), serviceConfig.ImageName);
+                }
             }
             catch (Exception ex)
             {
@@ -119,6 +197,7 @@ public class DockerHelper
     
     private async Task ReplaceContainers(IEnumerable<ContainerListResponse> monitoredContainers)
     {
+        // must debug this
         foreach (var container in monitoredContainers)
         {
             try
@@ -138,7 +217,7 @@ public class DockerHelper
                     Name = container.Names.First().Replace("/", "")
                 };
 
-                await _dockerClient.Containers.RemoveContainerAsync(container.ID, new ContainerRemoveParameters { Force = true });
+                await _dockerClient.Containers.RemoveContainerAsync(container.ID, new ContainerRemoveParameters());
 
                 var response = await _dockerClient.Containers.CreateContainerAsync(createParams);
                 
@@ -153,7 +232,7 @@ public class DockerHelper
         }
     }
     
-    private List<ContainerListResponse> SortByDependencies(IList<ContainerListResponse> containers)
+    private List<ContainerListResponse> SortContainersByDependencies(IList<ContainerListResponse> containers)
     {
         var sortedList = new List<ContainerListResponse>();
         
@@ -185,7 +264,7 @@ public class DockerHelper
             
             // Circular dependency detection
             if (visiting.Contains(containerName)) 
-                throw new InvalidOperationException($"Critical: Circular dependency detected involving container '{containerName}'!");
+                throw new InvalidOperationException($"An circular dependency has detected involving containers '{containerName}'"); // see to add which container is the conflict
 
             visiting.Add(containerName);
 
@@ -204,7 +283,6 @@ public class DockerHelper
                 }
             }
 
-            // 2. Mark as visited and add to list AFTER dependencies are resolved
             visiting.Remove(containerName);
             
             visited.Add(containerName);
