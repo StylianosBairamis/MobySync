@@ -1,4 +1,4 @@
-namespace docker_image_updater.Data.Models;
+namespace docker_image_updater.Models;
 
 public class UpdaterConfiguration
 {
