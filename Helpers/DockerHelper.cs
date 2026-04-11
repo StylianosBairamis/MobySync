@@ -1,4 +1,4 @@
-using docker_image_updater.Data.Models;
+using docker_image_updater.Models;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 
@@ -39,7 +39,7 @@ public class DockerHelper
                 var outdatedContainers = await CheckGroupImages(containerGroup.Value);
 
                 if (outdatedContainers is null|| !outdatedContainers.Any())
-                    return;
+                    continue;
                 
                 _logger.LogInformation("Update Execution Order: {Order}", 
                     string.Join(" -> ", outdatedContainers.Select(container => container.Names.First().Replace("/", ""))));
@@ -92,60 +92,77 @@ public class DockerHelper
     }
     
     private Dictionary<string, List<ContainerListResponse>> GroupDependentContainers(IEnumerable<ContainerListResponse> monitoredContainers)
+{
+    var containerMap = monitoredContainers.ToDictionary(
+        container => container.Names.First().Replace("/", ""),
+        container => container);
+    
+    var adjacencyList = new Dictionary<string, HashSet<string>>();
+    
+    foreach (var name in containerMap.Keys)
     {
-        var containerMap = monitoredContainers.ToDictionary(
-            container => container.Names.First().Replace("/", ""),
-            container => container);
+        adjacencyList[name] = new HashSet<string>();
+    }
+    
+    foreach (var container in monitoredContainers)
+    {
+        var containerName = container.Names.First().Replace("/", "");
         
-        var adjacencyList = new Dictionary<string, HashSet<string>>();
-        
-        foreach (var name in containerMap.Keys)
+        if (container.Labels != null && container.Labels.TryGetValue("com.update.depends-on", out var deps))
         {
-            adjacencyList[name] = new HashSet<string>();
-        }
-
-        var visited = new HashSet<string>();
-        
-        var groupedDictionary = new Dictionary<string, List<ContainerListResponse>>();
-        
-        var groupCounter = 1;
-
-        foreach (var nodeName in containerMap.Keys)
-        {
-            if (!visited.Contains(nodeName))
+            foreach (var dependency in deps.Split(',').Select(dependency => dependency.Trim()))
             {
-                var currentGroupNames = new List<string>();
-            
-                ExploreNode(nodeName, currentGroupNames);
-
-                var containersGroup = currentGroupNames.Select(name => containerMap[name])
-                                                                            .ToList();
-                
-                var sortedGroup = SortContainersByDependencies(containersGroup);
-            
-                groupedDictionary.Add($"Auto-Group-{groupCounter}", sortedGroup);
-                
-                groupCounter++;
-            }
-        }
-
-        return groupedDictionary;
-        
-        void ExploreNode(string current, List<string> group)
-        {
-            visited.Add(current);
-            
-            group.Add(current);
-
-            foreach (var neighbor in adjacencyList[current])
-            {
-                if (!visited.Contains(neighbor))
+                if (containerMap.ContainsKey(dependency))
                 {
-                    ExploreNode(neighbor, group);
+                    adjacencyList[containerName].Add(dependency);
+                    
+                    adjacencyList[dependency].Add(containerName);
                 }
             }
         }
     }
+
+    var visited = new HashSet<string>();
+    
+    var groupedDictionary = new Dictionary<string, List<ContainerListResponse>>();
+    
+    var groupCounter = 1;
+
+    foreach (var nodeName in containerMap.Keys)
+    {
+        if (!visited.Contains(nodeName))
+        {
+            var currentGroupNames = new List<string>();
+        
+            ExploreNode(nodeName, currentGroupNames);
+
+            var containersGroup = currentGroupNames.Select(name => containerMap[name]).ToList();
+            
+            var sortedGroup = SortContainersByDependencies(containersGroup);
+        
+            groupedDictionary.Add($"Auto-Group-{groupCounter}", sortedGroup);
+            
+            groupCounter++;
+        }
+    }
+
+    return groupedDictionary;
+    
+    void ExploreNode(string current, List<string> group)
+    {
+        visited.Add(current);
+        
+        group.Add(current);
+
+        foreach (var neighbor in adjacencyList[current])
+        {
+            if (!visited.Contains(neighbor))
+            {
+                ExploreNode(neighbor, group);
+            }
+        }
+    }
+}
     
     private async Task<IList<ContainerListResponse>?> CheckGroupImages(IList<ContainerListResponse> monitoredContainers)
     {
@@ -181,11 +198,13 @@ public class DockerHelper
                 {
                     outdatedContainers.Add(container);
                     
-                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}", serviceConfig.ImageName, pulledImageId);
+                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}", 
+                        serviceConfig.ImageName, pulledImageId);
                 }
                 else
                 {
-                    _logger.LogInformation("Container {Container} is already running the latest version of {Image}", container.Names.First(), serviceConfig.ImageName);
+                    _logger.LogInformation("Container {Container} is already running the latest version of {Image}", 
+                        container.Names.First().Replace("/", ""), serviceConfig.ImageName);
                 }
             }
             catch (Exception ex)
@@ -200,10 +219,10 @@ public class DockerHelper
         return outdatedContainers;
     }
     
-    private async Task ReplaceContainers(IEnumerable<ContainerListResponse> monitoredContainers)
+    private async Task ReplaceContainers(IEnumerable<ContainerListResponse> outdatedContainers)
     {
         // must debug this
-        foreach (var container in monitoredContainers)
+        foreach (var container in outdatedContainers)
         {
             try
             {
@@ -221,6 +240,8 @@ public class DockerHelper
                     NetworkingConfig = new NetworkingConfig { EndpointsConfig = containerConfiguration.NetworkSettings.Networks },
                     Name = container.Names.First().Replace("/", "")
                 };
+                
+                await _dockerClient.Containers.StopContainerAsync(container.ID, new ContainerStopParameters());
 
                 await _dockerClient.Containers.RemoveContainerAsync(container.ID, new ContainerRemoveParameters());
 

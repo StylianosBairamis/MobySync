@@ -24,8 +24,33 @@ services:
     ports:
       - "8080:80"
 
-  updater:
-    image: updater-test
-    container_name: docker-updater
+  postgres-db:
+    image: postgres:15
+    container_name: postgres-db
     environment:
-      API_KEY: test
+      POSTGRES_PASSWORD: secretpassword
+
+  redis-cache:
+    image: redis:7
+    container_name: redis-cache
+
+  backend-api:
+    image: node:18-alpine
+    container_name: backend-api
+    command: "node -e 'console.log(\"Running...\"); setInterval(()=>{}, 1000);'"
+    labels:
+      - "com.update.depends-on=postgres-db,redis-cache"
+    ports:
+      - "5000:5000"
+
+  nginx-proxy:
+    image: nginx:latest
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+
+  whoami-service:
+    image: traefik/whoami
+    container_name: whoami-service
+    ports:
+      - "8081:80"

@@ -6,18 +6,7 @@ public class UpdateCoordinator(DockerHelper dockerHelper, ILogger<UpdateCoordina
     
     private async Task StartUpdateCycle()
     {
-        try
-        {
-            await dockerHelper.CheckForImageUpdates();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "A critical error occurred during the update cycle.");
-        }
-        finally
-        {
-            _updateProcessLock.Release();
-        }
+        await dockerHelper.CheckForImageUpdates();
     }
 
     public async Task<bool> TryStartManualUpdate()

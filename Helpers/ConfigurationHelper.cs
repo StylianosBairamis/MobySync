@@ -1,19 +1,19 @@
 using System.Text.Json;
-using docker_image_updater.Data.Models;
+using docker_image_updater.Models;
 
-namespace docker_image_updater.Services;
+namespace docker_image_updater.Helpers;
 
-public class ConfigurationService : IConfigurationService
+public class ConfigurationHelper
 {
     private readonly string _updateConfigurationPath;
     
     private readonly UpdaterConfiguration _updaterConfiguration;
     
-    private readonly ILogger<ConfigurationService> _logger;
+    private readonly ILogger<ConfigurationHelper> _logger;
     
     private readonly SemaphoreSlim _fileLock = new(1, 1);
 
-    public ConfigurationService(ILogger<ConfigurationService> logger)
+    public ConfigurationHelper(ILogger<ConfigurationHelper> logger)
     {
         _logger = logger;
         

@@ -6,12 +6,37 @@
       "targetTag": "latest"
     },
     {
+      "imageName": "grafana/grafana",
+      "enabled": true,
+      "targetTag": "10.0.0"
+    },
+    {
       "imageName": "dpage/pgadmin4",
+      "enabled": true,
+      "targetTag": "7.0"
+    },
+    {
+      "imageName": "postgres",
+      "enabled": true,
+      "targetTag": "15"
+    },
+    {
+      "imageName": "redis",
+      "enabled": true,
+      "targetTag": "7"
+    },
+    {
+      "imageName": "node",
+      "enabled": true,
+      "targetTag": "18-alpine"
+    },
+    {
+      "imageName": "nginx",
       "enabled": true,
       "targetTag": "latest"
     },
     {
-      "imageName": "grafana/grafana",
+      "imageName": "traefik/whoami",
       "enabled": true,
       "targetTag": "latest"
     }
