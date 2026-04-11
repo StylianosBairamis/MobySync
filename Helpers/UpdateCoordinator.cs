@@ -2,7 +2,7 @@ namespace docker_image_updater.Helpers;
 
 public class UpdateCoordinator(DockerHelper dockerHelper, ILogger<UpdateCoordinator> logger)
 {
-    private readonly SemaphoreSlim _updateProcessLock = new SemaphoreSlim(1, 1);
+    private readonly SemaphoreSlim _updateProcessLock = new(1, 1);
     
     private async Task StartUpdateCycle()
     {

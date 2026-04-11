@@ -36,14 +36,15 @@ public class DockerHelper
 
             foreach (var containerGroup in containersGroups)
             {
-                var successfulOperation = await PullImages(containerGroup.Value);
+                var outdatedContainers = await CheckGroupImages(containerGroup.Value);
 
-                if (!successfulOperation)
+                if (outdatedContainers is null|| !outdatedContainers.Any())
                     return;
+                
                 _logger.LogInformation("Update Execution Order: {Order}", 
-                    string.Join(" -> ", containerGroup.Value.Select(container => container.Names.First().Replace("/", ""))));
+                    string.Join(" -> ", outdatedContainers.Select(container => container.Names.First().Replace("/", ""))));
         
-                await ReplaceContainers(containerGroup.Value);
+                await ReplaceContainers(outdatedContainers);
             }
 
             if (_updaterConfiguration.GenericSettings.PruneOldImages)
@@ -146,8 +147,10 @@ public class DockerHelper
         }
     }
     
-    private async Task<bool> PullImages(IEnumerable<ContainerListResponse> monitoredContainers)
+    private async Task<IList<ContainerListResponse>?> CheckGroupImages(IList<ContainerListResponse> monitoredContainers)
     {
+        var outdatedContainers = new List<ContainerListResponse>();
+        
         foreach (var container in monitoredContainers)
         {
             var baseImageName = FetchBaseImageName(container.Image);
@@ -157,7 +160,7 @@ public class DockerHelper
 
             if (serviceConfig is null)
             {
-                return false;
+                return null;
             }
             
             try 
@@ -176,6 +179,8 @@ public class DockerHelper
 
                 if (runningImageId != pulledImageId)
                 {
+                    outdatedContainers.Add(container);
+                    
                     _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}", serviceConfig.ImageName, pulledImageId);
                 }
                 else
@@ -185,14 +190,14 @@ public class DockerHelper
             }
             catch (Exception ex)
             {
-                _logger.LogError("An unexpected error occurred while trying to pull {Image}.\nException message:{ex}", 
-                    serviceConfig.ImageName, ex.Message);
+                _logger.LogError(ex, "An unexpected error occurred while trying to pull {Image}. Aborting group update.", 
+                    serviceConfig.ImageName);
 
-                return false;
+                return null;
             }
         }
         
-        return true;
+        return outdatedContainers;
     }
     
     private async Task ReplaceContainers(IEnumerable<ContainerListResponse> monitoredContainers)
