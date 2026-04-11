@@ -19,11 +19,11 @@ public class ConfigurationHelper
         
         var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
         
-        _updateConfigurationPath = Path.Combine(baseDirectory, "updater-configuration.json");
+        _updateConfigurationPath = Path.Combine(baseDirectory, "Configuration", "updater-configuration.json");
 
         if (!File.Exists(_updateConfigurationPath))
         {
-            throw new FileNotFoundException("Update configuration file could not be found", _updateConfigurationPath);
+            throw new FileNotFoundException("updater-configuration.json file could not be found, exiting...", _updateConfigurationPath);
         }
 
         try
@@ -37,7 +37,7 @@ public class ConfigurationHelper
         }
         catch (Exception ex)
         {
-            _logger.LogCritical(ex, "An unexpected error occurred while trying to load update configuration");
+            _logger.LogCritical(ex, "An unexpected error occurred while trying to load update configuration, exiting...");
             
             throw;
         }

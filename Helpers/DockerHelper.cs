@@ -36,7 +36,7 @@ public class DockerHelper
 
             foreach (var containerGroup in containersGroups)
             {
-                var outdatedContainers = await CheckGroupImages(containerGroup.Value);
+                var outdatedContainers = await PullGroupImages(containerGroup.Value);
 
                 if (outdatedContainers is null|| !outdatedContainers.Any())
                     continue;
@@ -164,7 +164,7 @@ public class DockerHelper
     }
 }
     
-    private async Task<IList<ContainerListResponse>?> CheckGroupImages(IList<ContainerListResponse> monitoredContainers)
+    private async Task<IList<ContainerListResponse>?> PullGroupImages(IList<ContainerListResponse> monitoredContainers)
     {
         var outdatedContainers = new List<ContainerListResponse>();
         
@@ -184,11 +184,11 @@ public class DockerHelper
             {
                 await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
                 {
-                    FromImage = serviceConfig.ImageName,
+                    FromImage = baseImageName,
                     Tag = serviceConfig.TargetTag
                 }, new AuthConfig(), new Progress<JSONMessage>());
                 
-                var pulledImageInformation = await _dockerClient.Images.InspectImageAsync(baseImageName);
+                var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{serviceConfig.TargetTag}");
 
                 var pulledImageId = pulledImageInformation.ID;
                 
@@ -203,8 +203,8 @@ public class DockerHelper
                 }
                 else
                 {
-                    _logger.LogInformation("Container {Container} is already running the latest version of {Image}", 
-                        container.Names.First().Replace("/", ""), serviceConfig.ImageName);
+                    _logger.LogInformation("Container {Container} is already running the latest version ", 
+                        container.Names.First().Replace("/", ""));
                 }
             }
             catch (Exception ex)
@@ -221,7 +221,6 @@ public class DockerHelper
     
     private async Task ReplaceContainers(IEnumerable<ContainerListResponse> outdatedContainers)
     {
-        // must debug this
         foreach (var container in outdatedContainers)
         {
             try

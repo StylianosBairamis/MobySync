@@ -1,4 +1,4 @@
-@baseUrl= http://localhost:5040
+@baseUrl= http://localhost:5080
 @apiKey = super-secret-key
 
 POST {{baseUrl}}/api/update/trigger

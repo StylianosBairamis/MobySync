@@ -8,7 +8,7 @@
     {
       "imageName": "grafana/grafana",
       "enabled": true,
-      "targetTag": "10.0.0"
+      "targetTag": "main"
     },
     {
       "imageName": "dpage/pgadmin4",
@@ -18,17 +18,17 @@
     {
       "imageName": "postgres",
       "enabled": true,
-      "targetTag": "15"
+      "targetTag": "latest"
     },
     {
       "imageName": "redis",
       "enabled": true,
-      "targetTag": "7"
+      "targetTag": "latest"
     },
     {
       "imageName": "node",
       "enabled": true,
-      "targetTag": "18-alpine"
+      "targetTag": "latest"
     },
     {
       "imageName": "nginx",

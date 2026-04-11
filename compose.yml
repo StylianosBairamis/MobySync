@@ -10,4 +10,3 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock      
       - ~/.docker/config.json:/creds/config.json:ro
-      - ./appsettings.json:/app/appsettings.json

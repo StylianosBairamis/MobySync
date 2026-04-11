@@ -9,7 +9,7 @@ public class CredentialsHelper(ILogger<CredentialsHelper> logger)
 {
     private readonly string _credentialsFileName = "config.json";
 
-    private readonly string _credentialsDirectory = "creds";
+    private readonly string _credentialsDirectory = "Configuration";
     
     private async Task<AuthConfig> FetchCredentials(string baseImageName)
     {
