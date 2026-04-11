@@ -1,8 +1,13 @@
-using docker_image_updater.Extensions;
-using docker_image_updater.Filters;
-using docker_image_updater.Helpers;
-using docker_image_updater.Models;
-using docker_image_updater.Services;
+using MobySync.Extensions;
+using MobySync.Filters;
+using MobySync.Helpers;
+using MobySync.Models;
+using MobySync.Services;
+using MobySync.Extensions;
+using MobySync.Filters;
+using MobySync.Helpers;
+using MobySync.Models;
+using MobySync.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 

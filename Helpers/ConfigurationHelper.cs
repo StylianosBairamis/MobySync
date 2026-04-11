@@ -1,7 +1,7 @@
 using System.Text.Json;
-using docker_image_updater.Models;
+using MobySync.Models;
 
-namespace docker_image_updater.Helpers;
+namespace MobySync.Helpers;
 
 public class ConfigurationHelper
 {

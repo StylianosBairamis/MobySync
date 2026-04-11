@@ -1,4 +1,4 @@
-namespace docker_image_updater.Helpers;
+namespace MobySync.Helpers;
 
 public class UpdateCoordinator(DockerHelper dockerHelper, ILogger<UpdateCoordinator> logger)
 {

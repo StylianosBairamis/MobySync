@@ -1,4 +1,4 @@
-namespace docker_image_updater.Models;
+namespace MobySync.Models;
 
 public class RegistryCredentials
 {

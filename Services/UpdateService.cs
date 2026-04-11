@@ -1,7 +1,7 @@
-using docker_image_updater.Helpers;
-using docker_image_updater.Models;
+using MobySync.Helpers;
+using MobySync.Models;
 
-namespace docker_image_updater.Services;
+namespace MobySync.Services;
 
 public class UpdateService(UpdaterConfiguration updaterConfiguration, UpdateCoordinator updateCoordinator, ILogger<UpdateService> logger) : BackgroundService
 {

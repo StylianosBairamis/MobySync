@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace docker_image_updater.Models;
+namespace MobySync.Models;
 
 public class RegistryAuth
 {

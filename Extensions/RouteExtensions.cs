@@ -1,9 +1,9 @@
-using docker_image_updater.Dtos;
-using docker_image_updater.Helpers;
-using docker_image_updater.Models;
+using MobySync.Dtos;
+using MobySync.Helpers;
+using MobySync.Models;
 using Microsoft.AspNetCore.Mvc;
 
-namespace docker_image_updater.Extensions;
+namespace MobySync.Extensions;
 
 public static class RouteExtensions
 {

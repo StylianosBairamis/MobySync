@@ -1,9 +1,9 @@
 using System.Text;
 using System.Text.Json;
-using docker_image_updater.Models;
+using MobySync.Models;
 using Docker.DotNet.Models;
 
-namespace docker_image_updater.Helpers;
+namespace MobySync.Helpers;
 
 public class CredentialsHelper(ILogger<CredentialsHelper> logger)
 {

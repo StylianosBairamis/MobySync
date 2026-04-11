@@ -1,4 +1,4 @@
-namespace docker_image_updater.Filters;
+namespace MobySync.Filters;
 
 public class ApiKeyFilter : IEndpointFilter
 {

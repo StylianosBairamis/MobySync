@@ -1,6 +1,6 @@
-using docker_image_updater.Models;
+using MobySync.Models;
 
-namespace docker_image_updater.Dtos;
+namespace MobySync.Dtos;
 
 public class UpdateConfigurationDto
 {
