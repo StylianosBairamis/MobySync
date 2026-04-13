@@ -9,16 +9,20 @@ public class DockerHelper
     private readonly DockerClient _dockerClient;
     
     private readonly ILogger<DockerHelper> _logger;
+    
+    private readonly CredentialsHelper _credentialsHelper;
 
     private bool _pruneImages;
     
-    public DockerHelper(ILogger<DockerHelper> logger)
+    public DockerHelper(ILogger<DockerHelper> logger, CredentialsHelper credentialsHelper)
     {
         var dockerSocketUri = new Uri("unix:///var/run/docker.sock");
 
         _dockerClient = new DockerClientConfiguration(dockerSocketUri).CreateClient();
         
         _logger = logger;
+        
+        _credentialsHelper = credentialsHelper; 
         
         _pruneImages = false;
 
@@ -187,13 +191,15 @@ public class DockerHelper
                 targetTag = targetTagParsed;
             }
 
-            try 
+            try
             {
+                var authCredentials = await _credentialsHelper.FetchCredentials(baseImageName);
+                
                 await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
                 {
                     FromImage = baseImageName,
                     Tag = targetTag
-                }, new AuthConfig(), new Progress<JSONMessage>());
+                }, authCredentials, new Progress<JSONMessage>());
                 
                 var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{targetTag}");
 
@@ -411,7 +417,7 @@ public class DockerHelper
             visiting.Add(containerName);
 
             // Traverse to the dependencies of the container.
-            if (container.Labels.TryGetValue("com.update.depends-on", out var dependenciesString))
+            if (container.Labels.TryGetValue("com.mobysync.depends-on", out var dependenciesString))
             {
                 var dependencies = dependenciesString.Split(',')
                     .Select(dependency => dependency.Trim());

@@ -9,9 +9,9 @@ public class CredentialsHelper(ILogger<CredentialsHelper> logger)
 {
     private readonly string _credentialsFileName = "config.json";
 
-    private readonly string _credentialsDirectory = "Configuration";
+    private readonly string _credentialsDirectory = "creds";
     
-    private async Task<AuthConfig> FetchCredentials(string baseImageName)
+    public async Task<AuthConfig> FetchCredentials(string baseImageName)
     {
         var registryLoginUrl = "https://index.docker.io/v1/"; 
         

@@ -1,7 +1,4 @@
-using MobySync.Dtos;
 using MobySync.Helpers;
-using MobySync.Models;
-using Microsoft.AspNetCore.Mvc;
 
 namespace MobySync.Extensions;
 
