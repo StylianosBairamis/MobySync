@@ -26,11 +26,8 @@ public class CredentialsHelper(ILogger<CredentialsHelper> logger)
             
             registryServerAddress = parts[0];
         }
-
-        // remove this later this will be mounted
-        var userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         
-        var dockerConfigPath = Path.Combine(userProfilePath, ".docker", _credentialsFileName);
+        var dockerConfigPath = Path.Combine("/app", _credentialsDirectory, _credentialsFileName);
 
         if (!File.Exists(dockerConfigPath))
         {
