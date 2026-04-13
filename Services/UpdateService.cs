@@ -10,18 +10,29 @@ public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateSe
     
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
+        if (int.TryParse(Environment.GetEnvironmentVariable("UPDATE_HOUR"), out var hourParsed))
+        {
+            _updateHour = hourParsed; 
+        }
+        else
+        {
+            logger.LogInformation("UPDATE_HOUR variable is missing or invalid. Defaulting update hour to {Hour}", _updateHour);
+        }
+    
+        if (int.TryParse(Environment.GetEnvironmentVariable("UPDATE_MINUTE"), out var minuteParsed))
+        {
+            _updateMinute = minuteParsed; 
+        }
+        else
+        {
+            logger.LogInformation("UPDATE_MINUTE variable is missing or invalid. Defaulting update minute to {Minute}", _updateMinute);
+        }
+
+        logger.LogInformation("Daily updates are scheduled to run at {Hour:00}:{Minute:00} container time.",
+            _updateHour, _updateMinute);
+            
         var timezone = Environment.GetEnvironmentVariable("TZ");
-        
-        if(int.TryParse(Environment.GetEnvironmentVariable("UPDATE_HOUR"), out var hourParsed))
-        {
-            logger.LogInformation("UPDATE_HOUR variable is not set. Defaulting update hour to {Hour}", _updateHour);
-        }
-        
-        if(int.TryParse(Environment.GetEnvironmentVariable("UPDATE_MINUTE"), out var minuteParsed))
-        {
-            logger.LogInformation("UPDATE_MINUTE variable is not set. Defaulting update minute to {Minute}", _updateMinute);
-        }
-        
+
         if (string.IsNullOrWhiteSpace(timezone))
         {
             logger.LogWarning("Timezone variable is not set, the update schedule will default to the container's native timezone.");
@@ -39,8 +50,6 @@ public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateSe
             {
                 scheduledTime = scheduledTime.AddDays(1);
             }
-            
-            logger.LogInformation("Next scan for updates scheduled at: {Time}", scheduledTime);
             
             var delay = scheduledTime - dateTimeNow;
 
