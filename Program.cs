@@ -17,6 +17,13 @@ builder.Services.AddHostedService<UpdateService>();
 
 builder.Services.AddHttpClient();
 
+builder.Logging.ClearProviders();
+builder.Logging.AddSystemdConsole(options =>
+{
+    options.IncludeScopes = false;
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss";
+});
+
 var app = builder.Build();
 
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("API_KEY")))
