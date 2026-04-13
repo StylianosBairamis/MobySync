@@ -17,30 +17,5 @@ public static class RouteExtensions
                 ? Results.Accepted() 
                 : Results.Conflict(new { status = "An update process is already running" });
         });
-
-        endpoints.MapPut("/configuration", async ([FromBody] UpdateConfigurationDto updateConfigDto, ConfigurationHelper configurationHelper) =>
-        {
-            var currentConfig = configurationHelper.GetConfiguration();
-            
-            var newConfig = new UpdaterConfiguration
-            {
-                Services = updateConfigDto.Services ?? currentConfig.Services,
-                GenericSettings = updateConfigDto.GenericSettings ?? currentConfig.GenericSettings
-            };
-
-            if (!configurationHelper.Validate(newConfig, out string errorMessage))
-            {
-                return Results.BadRequest(new { error = errorMessage });
-            }
-
-            await configurationHelper.UpdateConfiguration(newConfig);
-            
-            return Results.Ok(newConfig);
-        });
-
-        endpoints.MapGet("/configuration", (ConfigurationHelper configService) => 
-        {
-            return Results.Ok(configService.GetConfiguration());
-        });
     }
 }

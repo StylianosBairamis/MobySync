@@ -1,13 +1,26 @@
 using MobySync.Helpers;
-using MobySync.Models;
 
 namespace MobySync.Services;
 
-public class UpdateService(ConfigurationHelper configurationHelper, UpdateCoordinator updateCoordinator, ILogger<UpdateService> logger) : BackgroundService
+public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateService> logger) : BackgroundService
 {
+    private int _updateHour = 23;
+    
+    private int _updateMinute = 30;
+    
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
         var timezone = Environment.GetEnvironmentVariable("TZ");
+        
+        if(int.TryParse(Environment.GetEnvironmentVariable("UPDATE_HOUR"), out var hourParsed))
+        {
+            logger.LogInformation("UPDATE_HOUR variable is not set. Defaulting update hour to {Hour}", _updateHour);
+        }
+        
+        if(int.TryParse(Environment.GetEnvironmentVariable("UPDATE_MINUTE"), out var minuteParsed))
+        {
+            logger.LogInformation("UPDATE_MINUTE variable is not set. Defaulting update minute to {Minute}", _updateMinute);
+        }
         
         if (string.IsNullOrWhiteSpace(timezone))
         {
@@ -16,31 +29,22 @@ public class UpdateService(ConfigurationHelper configurationHelper, UpdateCoordi
         
         while (!cancellationToken.IsCancellationRequested)
         {
-            var updaterConfiguration = configurationHelper.GetConfiguration();
-            
             var dateTimeNow = DateTime.Now;
 
-            var scheduledTimeUtc = dateTimeNow.Date.AddHours(updaterConfiguration.GenericSettings.Hour)
-                                    .AddMinutes(updaterConfiguration.GenericSettings.Minute);
+            var scheduledTime = dateTimeNow.Date.AddHours(_updateHour)
+                                    .AddMinutes(_updateMinute);
         
             // If the set time is past the current, schedule it for next day.
-            if (dateTimeNow > scheduledTimeUtc)
+            if (dateTimeNow > scheduledTime)
             {
-                scheduledTimeUtc = scheduledTimeUtc.AddDays(1);
+                scheduledTime = scheduledTime.AddDays(1);
             }
             
-            logger.LogInformation("Next scan for updates scheduled at: {Time}", scheduledTimeUtc);
+            logger.LogInformation("Next scan for updates scheduled at: {Time}", scheduledTime);
             
-            var delay = scheduledTimeUtc - dateTimeNow;
+            var delay = scheduledTime - dateTimeNow;
 
-            var scheduleChanged = await configurationHelper.ConfigChangedSignal.WaitAsync(delay, cancellationToken);
-
-            if (scheduleChanged)
-            {
-                logger.LogInformation("Configuration changed, recalculating update schedule");
-                
-                continue;
-            }
+            await Task.Delay(delay, cancellationToken);
 
             await updateCoordinator.ExecuteScheduledUpdate();
         }

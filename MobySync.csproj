@@ -11,4 +11,8 @@
       <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="Configuration\" />
+    </ItemGroup>
+
 </Project>

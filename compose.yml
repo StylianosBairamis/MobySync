@@ -1,13 +1,16 @@
 services:
-  moby-sync:
-    image: moby-sync:latest
-    container_name: moby-sync
+  mobysync:
+    image: mobysync:latest
+    container_name: mobysync
     restart: unless-stopped
     ports:
       - "5080:5080"
     environment:
       TZ: "Europe/Athens"
       API_KEY: "super-secret-key"
+      PRUNE_IMAGE: "true"
+      UPDATE_HOUR: "23"
+      UPDATE_MINUTE: "30"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock      
       - ~/.docker/config.json:/creds/config.json:ro

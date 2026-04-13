@@ -8,19 +8,24 @@ public class DockerHelper
 {
     private readonly DockerClient _dockerClient;
     
-    private readonly UpdaterConfiguration _updaterConfiguration;
-    
     private readonly ILogger<DockerHelper> _logger;
+
+    private bool _pruneImages;
     
-    public DockerHelper(UpdaterConfiguration updaterConfiguration, ILogger<DockerHelper> logger)
+    public DockerHelper(ILogger<DockerHelper> logger)
     {
         var dockerSocketUri = new Uri("unix:///var/run/docker.sock");
 
         _dockerClient = new DockerClientConfiguration(dockerSocketUri).CreateClient();
         
-        _updaterConfiguration = updaterConfiguration;
+        _logger = logger;
         
-        _logger = logger;   
+        _pruneImages = false;
+
+        if (bool.TryParse(Environment.GetEnvironmentVariable("PRUNE_IMAGES"), out var pruneImagesParsed))
+        {
+            _pruneImages = pruneImagesParsed;
+        }
     }
     
     public async Task CheckForImageUpdates()
@@ -32,7 +37,6 @@ public class DockerHelper
             if (monitoredContainers is null)
                 return;
         
-            // See if the sequence is correct here
             var containersGroups = GroupDependentContainers(monitoredContainers);
 
             foreach (var containerGroup in containersGroups)
@@ -42,13 +46,13 @@ public class DockerHelper
                 if (outdatedContainers is null|| !outdatedContainers.Any())
                     continue;
                 
-                _logger.LogInformation("Update Execution Order: {Order}", 
+                _logger.LogInformation("Group update execution order: {Order}", 
                     string.Join(" -> ", outdatedContainers.Select(container => container.Names.First().Replace("/", ""))));
         
                 await ReplaceContainers(outdatedContainers);
             }
 
-            if (_updaterConfiguration.GenericSettings.PruneOldImages)
+            if (_pruneImages)
             {
                 await _dockerClient.Images.PruneImagesAsync(new ImagesPruneParameters());
             }
@@ -63,31 +67,33 @@ public class DockerHelper
     {
         var allContainers = await _dockerClient.Containers.ListContainersAsync(new ContainersListParameters { All = true });
         
-        var enabledServices = _updaterConfiguration.Services.Where(service => service.Enabled)
-                                                        .Select(service => $"{service.ImageName}")
-                                                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        
-        if (!enabledServices.Any())
-        {
-            _logger.LogInformation("No enabled services were found in configuration.");
-            
-            return null;
-        }
-
-        // Filter running containers that match enabled services.
-        var monitoredContainers = allContainers.Where(container => container.State == "running")
+        var monitoredContainers = allContainers
+            .Where(container => container.State == "running")
             .Where(container => 
             {
-                var imageName = FetchBaseImageName(container.Image); 
-
-                return enabledServices.Contains(imageName);
+                if (container.Labels is not null && container.Labels.TryGetValue("com.mobysync.enable", out var isEnabledStr))
+                {
+                    bool.TryParse(isEnabledStr, out var isEnabled) ;
+                    
+                    return isEnabled;
+                }
+            
+                return false;
             })
             .ToList();
 
-        if (monitoredContainers.Any()) 
+        if (monitoredContainers.Any())
+        {
+            _logger.LogInformation("Found {Count} containers configured for monitoring.", monitoredContainers.Count);
+    
+            var containerNames = string.Join(", ", monitoredContainers.Select(container => container.Names.First().Replace("/", "")));
+            
+            _logger.LogInformation("Monitored containers: {Names}", containerNames);
+            
             return monitoredContainers;
+        }
         
-        _logger.LogInformation("No desired containers were found in running state.");
+        _logger.LogWarning("No containers were found in running state and monitoring enabled");
             
         return null;
     }
@@ -109,7 +115,7 @@ public class DockerHelper
         {
             var containerName = container.Names.First().Replace("/", "");
             
-            if (container.Labels != null && container.Labels.TryGetValue("com.update.depends-on", out var deps))
+            if (container.Labels != null && container.Labels.TryGetValue("com.mobysync.depends-on", out var deps))
             {
                 foreach (var dependency in deps.Split(',').Select(dependency => dependency.Trim()))
                 {
@@ -172,24 +178,24 @@ public class DockerHelper
         foreach (var container in monitoredContainers)
         {
             var baseImageName = FetchBaseImageName(container.Image);
-                
-            var serviceConfig = _updaterConfiguration.Services
-                .FirstOrDefault(service => service.ImageName.Equals(baseImageName, StringComparison.OrdinalIgnoreCase));
-
-            if (serviceConfig is null)
-            {
-                return null;
-            }
             
+            // Default tag in case of a misconfiguration by the user
+            var targetTag = "latest";
+                
+            if(container.Labels is not null && container.Labels.TryGetValue("com.mobysync.target-tag", out var targetTagParsed))
+            {
+                targetTag = targetTagParsed;
+            }
+
             try 
             {
                 await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
                 {
                     FromImage = baseImageName,
-                    Tag = serviceConfig.TargetTag
+                    Tag = targetTag
                 }, new AuthConfig(), new Progress<JSONMessage>());
                 
-                var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{serviceConfig.TargetTag}");
+                var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{targetTag}");
 
                 var pulledImageId = pulledImageInformation.ID;
                 
@@ -200,7 +206,7 @@ public class DockerHelper
                     outdatedContainers.Add(container);
                     
                     _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}", 
-                        serviceConfig.ImageName, pulledImageId);
+                        baseImageName, pulledImageId);
                 }
                 else
                 {
@@ -211,7 +217,7 @@ public class DockerHelper
             catch (Exception ex)
             {
                 _logger.LogError(ex, "An unexpected error occurred while trying to pull {Image}. Aborting group update.", 
-                    serviceConfig.ImageName);
+                    baseImageName);
 
                 return null;
             }
@@ -231,8 +237,13 @@ public class DockerHelper
             
             var baseImageName = FetchBaseImageName(containerForUpdate.Image);
             
-            var serviceConfig = _updaterConfiguration.Services
-                .First(service => service.ImageName.Equals(baseImageName, StringComparison.OrdinalIgnoreCase));
+            // Default tag in case of a misconfiguration by the user
+            var targetTag = "latest";
+                
+            if(containerForUpdate.Labels is not null && containerForUpdate.Labels.TryGetValue("com.mobysync.target-tag", out var targetTagParsed))
+            {
+                targetTag = targetTagParsed;
+            }
             
             var newContainerId = string.Empty;
             
@@ -244,7 +255,7 @@ public class DockerHelper
             {
                 var createParams = new CreateContainerParameters(containerConfiguration.Config)
                 {
-                    Image = $"{serviceConfig.ImageName}:{serviceConfig.TargetTag}",
+                    Image = $"{baseImageName}:{targetTag}",
                     HostConfig = containerConfiguration.HostConfig,
                     NetworkingConfig = new NetworkingConfig { EndpointsConfig = containerConfiguration.NetworkSettings.Networks },
                     Name = containerForUpdate.Names.First().Replace("/", "")
@@ -287,7 +298,7 @@ public class DockerHelper
                     ContainerBackupName = backupName
                 });
                 
-                _logger.LogInformation("Successfully updated {Container} to {Tag}", createParams.Name, serviceConfig.TargetTag);
+                _logger.LogInformation("Successfully updated {Container} to {Tag}", createParams.Name, targetTag);
             }
             catch (Exception ex)
             {
@@ -435,8 +446,4 @@ public class DockerHelper
 
         return imageFullPath;
     }
-    
-    
-
-   
 }
