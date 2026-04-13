@@ -1,6 +1,7 @@
 using MobySync.Models;
 using Docker.DotNet;
 using Docker.DotNet.Models;
+using MobySync.Interfaces;
 
 namespace MobySync.Helpers;
 
@@ -11,7 +12,7 @@ public class DockerHelper
     private readonly ILogger<DockerHelper> _logger;
     
     private readonly CredentialsHelper _credentialsHelper;
-
+    
     private bool _pruneImages;
     
     public DockerHelper(ILogger<DockerHelper> logger, CredentialsHelper credentialsHelper)
@@ -32,20 +33,24 @@ public class DockerHelper
         }
     }
     
-    public async Task CheckForImageUpdates()
+    public async Task<UpdateSummary> CheckForImageUpdates()
     {
+        var updateSummary = new UpdateSummary();
+        
+        var startTime = DateTime.Now;
+
         try
         {
             var monitoredContainers = await GetMonitoredContainers();
         
             if (monitoredContainers is null)
-                return;
+                return updateSummary;
         
             var containersGroups = GroupDependentContainers(monitoredContainers);
 
             foreach (var containerGroup in containersGroups)
             {
-                var outdatedContainers = await PullGroupImages(containerGroup.Value);
+                var outdatedContainers = await PullGroupImages(containerGroup.Value, updateSummary);
 
                 if (outdatedContainers is null|| !outdatedContainers.Any())
                     continue;
@@ -53,7 +58,7 @@ public class DockerHelper
                 _logger.LogInformation("Group update execution order: {Order}", 
                     string.Join(" -> ", outdatedContainers.Select(container => container.Names.First().Replace("/", ""))));
         
-                await ReplaceContainers(outdatedContainers);
+                await ReplaceContainers(outdatedContainers, updateSummary);
             }
 
             if (_pruneImages)
@@ -65,6 +70,15 @@ public class DockerHelper
         {
             _logger.LogError(ex, "An unexpected error occurred while trying to update the monitored containers.");
         }
+        finally
+        {
+            updateSummary.TotalDuration = DateTime.Now - startTime;
+            
+            _logger.LogInformation("Update cycle finished in {Duration}. Successes: {Success}, Rollbacks: {Rollback}, Failed Pulls: {Failed}", 
+                updateSummary.TotalDuration.ToString(@"hh\:mm\:ss"), updateSummary.Successes.Count, updateSummary.Rollbacks.Count, updateSummary.FailedPulls.Count);
+        }
+
+        return updateSummary;
     }
     
     private async Task<List<ContainerListResponse>?> GetMonitoredContainers()
@@ -175,13 +189,14 @@ public class DockerHelper
         }
     }
     
-    private async Task<IList<ContainerListResponse>?> PullGroupImages(IList<ContainerListResponse> monitoredContainers)
+    private async Task<IList<ContainerListResponse>?> PullGroupImages(IList<ContainerListResponse> monitoredContainers, UpdateSummary summary)
     {
         var outdatedContainers = new List<ContainerListResponse>();
         
         foreach (var container in monitoredContainers)
         {
             var baseImageName = FetchBaseImageName(container.Image);
+            var containerName = container.Names.First().Replace("/", "");
             
             // Default tag in case of a misconfiguration by the user
             var targetTag = "latest";
@@ -216,14 +231,23 @@ public class DockerHelper
                 }
                 else
                 {
-                    _logger.LogInformation("Container {Container} is already running the latest version ", 
-                        container.Names.First().Replace("/", ""));
+                    _logger.LogInformation("Container {Container} is already running the latest version ", containerName);
+                    
+                    summary.UpToDate.Add(containerName);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "An unexpected error occurred while trying to pull {Image}. Aborting group update.", 
                     baseImageName);
+
+                summary.FailedPulls.Add(new ContainerUpdateResult
+                {
+                    ContainerName = containerName,
+                    ImageName = baseImageName,
+                    ErrorMessage = ex.Message,
+                    Success = false
+                });
 
                 return null;
             }
@@ -232,7 +256,7 @@ public class DockerHelper
         return outdatedContainers;
     }
     
-    private async Task ReplaceContainers(IList<ContainerListResponse> containersForReplace) 
+    private async Task ReplaceContainers(IList<ContainerListResponse> containersForReplace, UpdateSummary summary) 
     {
         // Rollbacks are executed in the opposite direction 
         var transactionLog = new Stack<ContainerCheckpoint>();
@@ -264,7 +288,7 @@ public class DockerHelper
                     Image = $"{baseImageName}:{targetTag}",
                     HostConfig = containerConfiguration.HostConfig,
                     NetworkingConfig = new NetworkingConfig { EndpointsConfig = containerConfiguration.NetworkSettings.Networks },
-                    Name = containerForUpdate.Names.First().Replace("/", "")
+                    Name = originalName
                 };
                 
                 // Rename the target container for update, in order to avoid conflicts
@@ -280,7 +304,7 @@ public class DockerHelper
                 var successfulContainerStart = await _dockerClient.Containers.StartContainerAsync(createdContainer.ID, new ContainerStartParameters());
                 
                 if (!successfulContainerStart)
-                    throw new InvalidOperationException($""); // add a comment here
+                    throw new InvalidOperationException($"Failed to start container {originalName}");
                 
                 // Wait some time in order to check the state of the created container
                 await Task.Delay(TimeSpan.FromSeconds(10));
@@ -291,37 +315,51 @@ public class DockerHelper
                 
                 if (!createdContainerConfiguration.State.Running)
                 {
-                    throw new InvalidOperationException($"Container {createdContainerConfiguration.Name} crashed after starting, " +
+                    throw new InvalidOperationException($"Container {originalName} crashed after starting, " +
                                                         $"exit Code: {createdContainerConfiguration.State.ExitCode}");
                 }
                 
                 // Add entry for rollback in case of a failure
                 transactionLog.Push(new ContainerCheckpoint
                 {
-                    OldContainerId = containerConfiguration.ID,
-                    NewContainerId = newContainerId,
-                    ContainerOriginalName = containerConfiguration.Name,
-                    ContainerBackupName = backupName
+                    OldId = containerConfiguration.ID,
+                    NewId = newContainerId,
+                    OriginalName = originalName,
+                    BackupName = backupName
+                });
+
+                summary.Successes.Add(new ContainerUpdateResult
+                {
+                    ContainerName = originalName,
+                    ImageName = baseImageName,
+                    NewTag = targetTag,
+                    Success = true
                 });
                 
-                _logger.LogInformation("Successfully updated {Container} to {Tag}", createParams.Name, targetTag);
+                _logger.LogInformation("Successfully updated {Container} to {Tag}", originalName, targetTag);
             }
             catch (Exception ex)
             {
-                _logger.LogCritical(ex, "An unexpected error occurred while trying to replace container with id: {ContainerId}. " +
-                                        "Reverting changes of previously updated containers", containerForUpdate.ID);
+                _logger.LogCritical(ex, "An unexpected error occurred while trying to replace container {Container}. " +
+                                        "Reverting changes of previously updated containers", originalName);
                 
+                summary.Rollbacks.Add(new ContainerUpdateResult
+                {
+                    ContainerName = originalName,
+                    ImageName = baseImageName,
+                    ErrorMessage = ex.Message,
+                    Success = false
+                });
+
                 transactionLog.Push(new ContainerCheckpoint
                 {
-                    OldContainerId = containerConfiguration.ID,
-                    NewContainerId = newContainerId,
-                    ContainerOriginalName = containerConfiguration.Name,
-                    ContainerBackupName = backupName
+                    OldId = containerConfiguration.ID,
+                    NewId = newContainerId,
+                    OriginalName = originalName,
+                    BackupName = backupName
                 });
 
                 await AttemptRollback(transactionLog);
-                
-                // send notification
 
                 return;
             }
@@ -331,15 +369,11 @@ public class DockerHelper
         {
             try
             {
-                await _dockerClient.Containers.RemoveContainerAsync(checkpoint.OldContainerId, new ContainerRemoveParameters { Force = true });
+                await _dockerClient.Containers.RemoveContainerAsync(checkpoint.OldId, new ContainerRemoveParameters { Force = true });
             }
             catch (Exception ex)
             {
-                var backupContainerName = checkpoint.ContainerOriginalName + "-backup";
-                
-                _logger.LogWarning(ex, "Failed to remove backup container {BackupName}, manual intervention is needed", backupContainerName);
-                
-                // send notification
+                _logger.LogWarning(ex, "Failed to remove backup container {BackupName}, manual intervention is needed", checkpoint.BackupName);
             }
         }
     }
@@ -348,33 +382,33 @@ public class DockerHelper
     {
         foreach (var checkpoint in transactionLog)
         {
-            _logger.LogInformation("Starting rollback process for container: {Container}", checkpoint.ContainerOriginalName);
+            _logger.LogInformation("Starting rollback process for container: {Container}", checkpoint.OriginalName);
             
             try
             {
-                if (!string.IsNullOrEmpty(checkpoint.NewContainerId))
+                if (!string.IsNullOrEmpty(checkpoint.NewId))
                 {
                     _logger.LogInformation("Removing failed container instance");
                     
-                    await _dockerClient.Containers.RemoveContainerAsync(checkpoint.NewContainerId, new ContainerRemoveParameters { Force = true });
+                    await _dockerClient.Containers.RemoveContainerAsync(checkpoint.NewId, new ContainerRemoveParameters { Force = true });
                 }
 
-                var oldContainerInspect = await _dockerClient.Containers.InspectContainerAsync(checkpoint.OldContainerId);
+                var oldContainerInspect = await _dockerClient.Containers.InspectContainerAsync(checkpoint.OldId);
                 
                 // We only rename it back if it currently has the backup name
-                if (oldContainerInspect.Name.Replace("/", "") == checkpoint.ContainerBackupName)
+                if (oldContainerInspect.Name.Replace("/", "") == checkpoint.BackupName)
                 {
                     _logger.LogInformation("Restoring original name...");
                     
-                    await _dockerClient.Containers.RenameContainerAsync(checkpoint.OldContainerId, new ContainerRenameParameters { NewName = checkpoint.ContainerOriginalName }, CancellationToken.None);
+                    await _dockerClient.Containers.RenameContainerAsync(checkpoint.OldId, new ContainerRenameParameters { NewName = checkpoint.OriginalName }, CancellationToken.None);
                 }
                 
-                await _dockerClient.Containers.StartContainerAsync(checkpoint.OldContainerId, new ContainerStartParameters());
+                await _dockerClient.Containers.StartContainerAsync(checkpoint.OldId, new ContainerStartParameters());
             }
             catch (Exception ex)
             {
                 _logger.LogCritical(ex, "An unexpected error occurred while tying to rollback container: {Container}. " +
-                                        "Manual intervention is needed. Backup container is {BackupName}", checkpoint.ContainerOriginalName, checkpoint.ContainerBackupName);
+                                        "Manual intervention is needed. Backup container is {BackupName}", checkpoint.OriginalName, checkpoint.BackupName);
             }
         }
     }

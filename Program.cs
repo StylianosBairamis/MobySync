@@ -1,6 +1,7 @@
 using MobySync.Extensions;
 using MobySync.Filters;
 using MobySync.Helpers;
+using MobySync.Interfaces;
 using MobySync.Models;
 using MobySync.Services;
 
@@ -10,8 +11,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<DockerHelper>();
 builder.Services.AddSingleton<UpdateCoordinator>();
 builder.Services.AddSingleton<CredentialsHelper>();
+builder.Services.AddSingleton<INotificationHelper, DiscordNotificationHelper>();
 
 builder.Services.AddHostedService<UpdateService>();
+
+builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
