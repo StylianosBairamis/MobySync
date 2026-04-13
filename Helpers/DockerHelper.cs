@@ -32,6 +32,7 @@ public class DockerHelper
             if (monitoredContainers is null)
                 return;
         
+            // See if the sequence is correct here
             var containersGroups = GroupDependentContainers(monitoredContainers);
 
             foreach (var containerGroup in containersGroups)
@@ -91,78 +92,78 @@ public class DockerHelper
         return null;
     }
     
-    private Dictionary<string, List<ContainerListResponse>> GroupDependentContainers(IEnumerable<ContainerListResponse> monitoredContainers)
-{
-    var containerMap = monitoredContainers.ToDictionary(
-        container => container.Names.First().Replace("/", ""),
-        container => container);
-    
-    var adjacencyList = new Dictionary<string, HashSet<string>>();
-    
-    foreach (var name in containerMap.Keys)
+    private Dictionary<string, List<ContainerListResponse>> GroupDependentContainers(IList<ContainerListResponse> monitoredContainers)
     {
-        adjacencyList[name] = new HashSet<string>();
-    }
-    
-    foreach (var container in monitoredContainers)
-    {
-        var containerName = container.Names.First().Replace("/", "");
+        var containerMap = monitoredContainers.ToDictionary(
+            container => container.Names.First().Replace("/", ""),
+            container => container);
         
-        if (container.Labels != null && container.Labels.TryGetValue("com.update.depends-on", out var deps))
+        var adjacencyList = new Dictionary<string, HashSet<string>>();
+        
+        foreach (var name in containerMap.Keys)
         {
-            foreach (var dependency in deps.Split(',').Select(dependency => dependency.Trim()))
+            adjacencyList[name] = new HashSet<string>();
+        }
+        
+        foreach (var container in monitoredContainers)
+        {
+            var containerName = container.Names.First().Replace("/", "");
+            
+            if (container.Labels != null && container.Labels.TryGetValue("com.update.depends-on", out var deps))
             {
-                if (containerMap.ContainsKey(dependency))
+                foreach (var dependency in deps.Split(',').Select(dependency => dependency.Trim()))
                 {
-                    adjacencyList[containerName].Add(dependency);
-                    
-                    adjacencyList[dependency].Add(containerName);
+                    if (containerMap.ContainsKey(dependency))
+                    {
+                        adjacencyList[containerName].Add(dependency);
+                        
+                        adjacencyList[dependency].Add(containerName);
+                    }
+                }
+            }
+        }
+
+        var visited = new HashSet<string>();
+        
+        var groupedDictionary = new Dictionary<string, List<ContainerListResponse>>();
+        
+        var groupCounter = 1;
+
+        foreach (var nodeName in containerMap.Keys)
+        {
+            if (!visited.Contains(nodeName))
+            {
+                var currentGroupNames = new List<string>();
+            
+                ExploreNode(nodeName, currentGroupNames);
+
+                var containersGroup = currentGroupNames.Select(name => containerMap[name]).ToList();
+                
+                var sortedGroup = SortContainersByDependencies(containersGroup);
+            
+                groupedDictionary.Add($"Auto-Group-{groupCounter}", sortedGroup);
+                
+                groupCounter++;
+            }
+        }
+
+        return groupedDictionary;
+        
+        void ExploreNode(string current, List<string> group)
+        {
+            visited.Add(current);
+            
+            group.Add(current);
+
+            foreach (var neighbor in adjacencyList[current])
+            {
+                if (!visited.Contains(neighbor))
+                {
+                    ExploreNode(neighbor, group);
                 }
             }
         }
     }
-
-    var visited = new HashSet<string>();
-    
-    var groupedDictionary = new Dictionary<string, List<ContainerListResponse>>();
-    
-    var groupCounter = 1;
-
-    foreach (var nodeName in containerMap.Keys)
-    {
-        if (!visited.Contains(nodeName))
-        {
-            var currentGroupNames = new List<string>();
-        
-            ExploreNode(nodeName, currentGroupNames);
-
-            var containersGroup = currentGroupNames.Select(name => containerMap[name]).ToList();
-            
-            var sortedGroup = SortContainersByDependencies(containersGroup);
-        
-            groupedDictionary.Add($"Auto-Group-{groupCounter}", sortedGroup);
-            
-            groupCounter++;
-        }
-    }
-
-    return groupedDictionary;
-    
-    void ExploreNode(string current, List<string> group)
-    {
-        visited.Add(current);
-        
-        group.Add(current);
-
-        foreach (var neighbor in adjacencyList[current])
-        {
-            if (!visited.Contains(neighbor))
-            {
-                ExploreNode(neighbor, group);
-            }
-        }
-    }
-}
     
     private async Task<IList<ContainerListResponse>?> PullGroupImages(IList<ContainerListResponse> monitoredContainers)
     {
@@ -219,46 +220,151 @@ public class DockerHelper
         return outdatedContainers;
     }
     
-    private async Task ReplaceContainers(IEnumerable<ContainerListResponse> outdatedContainers)
+    private async Task ReplaceContainers(IList<ContainerListResponse> containersForReplace) 
     {
-        foreach (var container in outdatedContainers)
+        // Rollbacks are executed in the opposite direction 
+        var transactionLog = new Stack<ContainerCheckpoint>();
+        
+        foreach (var containerForUpdate in containersForReplace)
         {
+            var containerConfiguration = await _dockerClient.Containers.InspectContainerAsync(containerForUpdate.ID);
+            
+            var baseImageName = FetchBaseImageName(containerForUpdate.Image);
+            
+            var serviceConfig = _updaterConfiguration.Services
+                .First(service => service.ImageName.Equals(baseImageName, StringComparison.OrdinalIgnoreCase));
+            
+            var newContainerId = string.Empty;
+            
+            var originalName = containerForUpdate.Names.First().Replace("/", "");
+
+            var backupName = $"{originalName}-backup";
+            
             try
             {
-                var containerConfiguration = await _dockerClient.Containers.InspectContainerAsync(container.ID);
-                
-                var baseImageName = FetchBaseImageName(container.Image);
-                
-                var serviceConfig = _updaterConfiguration.Services
-                    .First(service => service.ImageName.Equals(baseImageName, StringComparison.OrdinalIgnoreCase));
-
                 var createParams = new CreateContainerParameters(containerConfiguration.Config)
                 {
                     Image = $"{serviceConfig.ImageName}:{serviceConfig.TargetTag}",
                     HostConfig = containerConfiguration.HostConfig,
                     NetworkingConfig = new NetworkingConfig { EndpointsConfig = containerConfiguration.NetworkSettings.Networks },
-                    Name = container.Names.First().Replace("/", "")
+                    Name = containerForUpdate.Names.First().Replace("/", "")
                 };
                 
-                await _dockerClient.Containers.StopContainerAsync(container.ID, new ContainerStopParameters());
-
-                await _dockerClient.Containers.RemoveContainerAsync(container.ID, new ContainerRemoveParameters());
-
-                var response = await _dockerClient.Containers.CreateContainerAsync(createParams);
+                // Rename the target container for update, in order to avoid conflicts
+                await _dockerClient.Containers.RenameContainerAsync(containerForUpdate.ID, new ContainerRenameParameters { NewName = backupName}, 
+                    CancellationToken.None);
                 
-                await _dockerClient.Containers.StartContainerAsync(response.ID, null);
+                // Stop the target container for update
+                await _dockerClient.Containers.StopContainerAsync(containerForUpdate.ID, new ContainerStopParameters());
+
+                var createdContainer = await _dockerClient.Containers.CreateContainerAsync(createParams);
+                
+                // Start the updated container
+                var successfulContainerStart = await _dockerClient.Containers.StartContainerAsync(createdContainer.ID, new ContainerStartParameters());
+                
+                if (!successfulContainerStart)
+                    throw new InvalidOperationException($""); // add a comment here
+                
+                // Wait some time in order to check the state of the created container
+                await Task.Delay(TimeSpan.FromSeconds(10));
+            
+                var createdContainerConfiguration = await _dockerClient.Containers.InspectContainerAsync(createdContainer.ID);
+                
+                newContainerId =  createdContainerConfiguration.ID;
+                
+                if (!createdContainerConfiguration.State.Running)
+                {
+                    throw new InvalidOperationException($"Container {createdContainerConfiguration.Name} crashed after starting, " +
+                                                        $"exit Code: {createdContainerConfiguration.State.ExitCode}");
+                }
+                
+                // Add entry for rollback in case of a failure
+                transactionLog.Push(new ContainerCheckpoint
+                {
+                    OldContainerId = containerConfiguration.ID,
+                    NewContainerId = newContainerId,
+                    ContainerOriginalName = containerConfiguration.Name,
+                    ContainerBackupName = backupName
+                });
                 
                 _logger.LogInformation("Successfully updated {Container} to {Tag}", createParams.Name, serviceConfig.TargetTag);
             }
             catch (Exception ex)
             {
-                _logger.LogCritical("Failed to recreate container {Id}: {Msg}", container.ID, ex.Message);
+                _logger.LogCritical(ex, "An unexpected error occurred while trying to replace container with id: {ContainerId}. " +
+                                        "Reverting changes of previously updated containers", containerForUpdate.ID);
+                
+                transactionLog.Push(new ContainerCheckpoint
+                {
+                    OldContainerId = containerConfiguration.ID,
+                    NewContainerId = newContainerId,
+                    ContainerOriginalName = containerConfiguration.Name,
+                    ContainerBackupName = backupName
+                });
+
+                await AttemptRollback(transactionLog);
+                
+                // send notification
+
+                return;
+            }
+        }
+        
+        foreach (var checkpoint in transactionLog)
+        {
+            try
+            {
+                await _dockerClient.Containers.RemoveContainerAsync(checkpoint.OldContainerId, new ContainerRemoveParameters { Force = true });
+            }
+            catch (Exception ex)
+            {
+                var backupContainerName = checkpoint.ContainerOriginalName + "-backup";
+                
+                _logger.LogWarning(ex, "Failed to remove backup container {BackupName}, manual intervention is needed", backupContainerName);
+                
+                // send notification
+            }
+        }
+    }
+    
+    private async Task AttemptRollback(Stack<ContainerCheckpoint> transactionLog)
+    {
+        foreach (var checkpoint in transactionLog)
+        {
+            _logger.LogInformation("Starting rollback process for container: {Container}", checkpoint.ContainerOriginalName);
+            
+            try
+            {
+                if (!string.IsNullOrEmpty(checkpoint.NewContainerId))
+                {
+                    _logger.LogInformation("Removing failed container instance");
+                    
+                    await _dockerClient.Containers.RemoveContainerAsync(checkpoint.NewContainerId, new ContainerRemoveParameters { Force = true });
+                }
+
+                var oldContainerInspect = await _dockerClient.Containers.InspectContainerAsync(checkpoint.OldContainerId);
+                
+                // We only rename it back if it currently has the backup name
+                if (oldContainerInspect.Name.Replace("/", "") == checkpoint.ContainerBackupName)
+                {
+                    _logger.LogInformation("Restoring original name...");
+                    
+                    await _dockerClient.Containers.RenameContainerAsync(checkpoint.OldContainerId, new ContainerRenameParameters { NewName = checkpoint.ContainerOriginalName }, CancellationToken.None);
+                }
+                
+                await _dockerClient.Containers.StartContainerAsync(checkpoint.OldContainerId, new ContainerStartParameters());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "An unexpected error occurred while tying to rollback container: {Container}. " +
+                                        "Manual intervention is needed. Backup container is {BackupName}", checkpoint.ContainerOriginalName, checkpoint.ContainerBackupName);
             }
         }
     }
     
     private List<ContainerListResponse> SortContainersByDependencies(IList<ContainerListResponse> containers)
     {
+        // This list is sorted so that base dependencies update first, and dependent containers update lastly
         var sortedList = new List<ContainerListResponse>();
         
         // Set used for containers that have been processed

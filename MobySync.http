@@ -5,3 +5,67 @@ POST {{baseUrl}}/api/update/trigger
 Accept: application/json
 Content-Type: application/json
 X-API-KEY: super-secret-key
+
+###
+
+GET {{baseUrl}}/api/configuration
+Accept: application/json
+X-API-KEY: super-secret-key
+
+###
+
+PUT {{baseUrl}}/api/configuration
+Accept: application/json
+Content-Type: application/json
+X-API-KEY: super-secret-key
+
+
+{
+  "genericSettings": {
+    "hour": 23,
+    "minute": 0,
+    "pruneOldImages": false
+  },
+  "services": [
+    {
+      "imageName": "prom/prometheus",
+      "enabled": true,
+      "targetTag": "latest"
+    },
+    {
+      "imageName": "grafana/grafana",
+      "enabled": true,
+      "targetTag": "main"
+    },
+    {
+      "imageName": "dpage/pgadmin4",
+      "enabled": true,
+      "targetTag": "7.0"
+    },
+    {
+      "imageName": "postgres",
+      "enabled": true,
+      "targetTag": "latest"
+    },
+    {
+      "imageName": "redis",
+      "enabled": true,
+      "targetTag": "latest"
+    },
+    {
+      "imageName": "node",
+      "enabled": true,
+      "targetTag": "latest"
+    },
+    {
+      "imageName": "nginx",
+      "enabled": true,
+      "targetTag": "latest"
+    },
+    {
+      "imageName": "traefik/whoami",
+      "enabled": true,
+      "targetTag": "latest"
+    }
+  ]
+}
