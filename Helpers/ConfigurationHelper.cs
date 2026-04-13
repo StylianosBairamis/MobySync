@@ -11,7 +11,11 @@ public class ConfigurationHelper
     
     private readonly ILogger<ConfigurationHelper> _logger;
     
-    private readonly SemaphoreSlim _fileLock = new(1, 1);
+    private readonly SemaphoreSlim _updateConfigurationFileLock = new(1, 1);
+
+    private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
+
+    public SemaphoreSlim ConfigChangedSignal => _configChangedSignal;
 
     public ConfigurationHelper(ILogger<ConfigurationHelper> logger)
     {
@@ -47,7 +51,7 @@ public class ConfigurationHelper
 
     public async Task UpdateConfiguration(UpdaterConfiguration updaterConfiguration)
     {
-        await _fileLock.WaitAsync();
+        await _updateConfigurationFileLock.WaitAsync();
         
         try
         { 
@@ -66,10 +70,15 @@ public class ConfigurationHelper
             await File.WriteAllTextAsync(_updateConfigurationPath, jsonString);
             
             _logger.LogInformation("Successfully update of configuration file");
+
+            if (_configChangedSignal.CurrentCount == 0)
+            {
+                _configChangedSignal.Release();
+            }
         }
         finally
         {
-            _fileLock.Release();
+            _updateConfigurationFileLock.Release();
         }
     }
 

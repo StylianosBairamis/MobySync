@@ -6,6 +6,7 @@ services:
     ports:
       - "5080:5080"
     environment:
+      TZ: "Europe/Athens"
       API_KEY: "super-secret-key"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock      
