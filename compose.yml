@@ -7,10 +7,12 @@ services:
       - "5080:5080"
     environment:
       TZ: "Europe/Athens"
-      API_KEY: "super-secret-key"
-      PRUNE_IMAGES: "true"
-      UPDATE_HOUR: "23"
-      UPDATE_MINUTE: "30"
+      API_KEY: ""
+      TEAMS_WEBHOOK_URL: ""
+      DISCORD_WEBHOOK_URL: ""
+      PRUNE_IMAGES: "false"
+      UPDATE_HOUR: 23
+      UPDATE_MINUTE: 30
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock      
       - ~/.docker/config.json:/app/creds/config.json:ro
