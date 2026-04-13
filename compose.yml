@@ -1,15 +1,15 @@
 services:
   mobysync:
-    image: mobysync:latest
+    image: steliosbairam/mobysync:latest
     container_name: mobysync
     restart: unless-stopped
     ports:
       - "5080:5080"
     environment:
       TZ: "Europe/Athens"
-      API_KEY: ""
+      API_KEY: "super-secret-key"
       TEAMS_WEBHOOK_URL: ""
-      DISCORD_WEBHOOK_URL: ""
+      DISCORD_WEBHOOK_URL: "https://discordapp.com/api/webhooks/1493214492379840642/gKwMFvDN2oZ-rMfIst44bi3aATkPQsjEc6LfGVGb9x5Z_DN-GC-GYj_PQHP-6E5-yxHf"
       PRUNE_IMAGES: "false"
       UPDATE_HOUR: 23
       UPDATE_MINUTE: 30
