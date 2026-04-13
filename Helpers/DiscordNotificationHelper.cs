@@ -4,10 +4,9 @@ namespace MobySync.Helpers;
 
 public class DiscordNotificationHelper : INotificationHelper
 {
-    private const int SuccessColor = 3066993; // Green
+    private readonly int _successColor = 3066993; 
     
-    private const int ErrorColor = 15158332;  // Red
-    
+    private readonly int _errorColor = 15158332; 
     public bool IsConfigured { get; }
     public string ProviderName { get; }
     public string WebhookUrl { get; } = string.Empty;
@@ -38,57 +37,10 @@ public class DiscordNotificationHelper : INotificationHelper
         }
     }
 
-    public async Task SendSuccessUpdate(string containerName, string newTag)
-    {
-        var payload = new
-        {
-            username = "MobySync",
-            avatar_url = "https://www.docker.com/wp-content/uploads/2022/03/Moby-logo.png", 
-            embeds = new[]
-            {
-                new
-                {
-                    title = "🚀 Update Successful",
-                    description = $"Successfully updated **{containerName}**.",
-                    color = SuccessColor,
-                    fields = new[]
-                    {
-                        new { name = "New Version", value = $"`{newTag}`", inline = true },
-                        new { name = "Time", value = DateTime.Now.ToString("g"), inline = true }
-                    }
-                }
-            }
-        };
-
-        await PostToDiscordAsync(payload);
-    }
-
-    public async Task SendRollbackAlert(string containerName, string errorMessage)
-    {
-        var payload = new
-        {
-            username = "MobySync",
-            embeds = new[]
-            {
-                new
-                {
-                    title = "⚠️ Update Failed & Rolled Back",
-                    description = $"An error occurred while updating **{containerName}**. The container has been safely rolled back to its previous state.",
-                    color = ErrorColor,
-                    fields = new[]
-                    {
-                        new { name = "Error Details", value = $"```{errorMessage}```", inline = false }
-                    }
-                }
-            }
-        };
-
-        await PostToDiscordAsync(payload);
-    }
-
     public async Task SendSummary(Models.UpdateSummary summary)
     {
-        if (!summary.HasChanges) return;
+        if (!summary.HasChanges) 
+            return;
 
         var fields = new List<object>();
 
@@ -125,13 +77,12 @@ public class DiscordNotificationHelper : INotificationHelper
         var payload = new
         {
             username = "MobySync",
-            avatar_url = "https://www.docker.com/wp-content/uploads/2022/03/Moby-logo.png",
             embeds = new[]
             {
                 new
                 {
-                    title = "📊 Update Cycle Summary",
-                    color = summary.Rollbacks.Any() || summary.FailedPulls.Any() ? ErrorColor : SuccessColor,
+                    title = "Update Cycle Summary",
+                    color = summary.Rollbacks.Any() || summary.FailedPulls.Any() ? _errorColor : _successColor,
                     fields = fields.ToArray(),
                     footer = new { text = $"Total duration: {summary.TotalDuration:mm\\:ss}" },
                     timestamp = DateTime.Now
