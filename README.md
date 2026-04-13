@@ -29,9 +29,9 @@ It monitors your running containers, pulls new images, and safely replaces conta
 | `PRUNE_IMAGES` | Set to `true` to remove old images after updates | `false` |
 | `DISCORD_WEBHOOK_URL` | URL for Discord notifications | - |
 
-### Container Labels (Metadata)
+### Container Labels
 
-MobySync only touches containers that you explicitly authorize via labels:
+MobySync only monitors containers that you explicitly authorize via labels:
 
 | Label | Description | Example |
 | :--- | :--- | :--- |
@@ -46,7 +46,7 @@ MobySync only touches containers that you explicitly authorize via labels:
 ```yaml
 services:
   mobysync:
-    image: mobysync:latest # Build from source or use registry
+    image: mobysync:latest
     container_name: mobysync
     restart: unless-stopped
     volumes:
@@ -82,6 +82,6 @@ Instantly starts a check for all monitored containers.
 ---
 
 
-## ⚖️ License
+## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
