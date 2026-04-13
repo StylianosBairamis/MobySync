@@ -46,7 +46,7 @@ MobySync only monitors containers that you explicitly authorize via labels:
 ```yaml
 services:
   mobysync:
-    image: mobysync:latest
+    image: steliosbairam/mobysync:latest
     container_name: mobysync
     restart: unless-stopped
     volumes:
