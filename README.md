@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # - ./config:/app/config # For custom credentials mapping
+      - ./config/config.json:/app/creds/config.json:ro
     environment:
       - API_KEY=your_secure_random_key
       - UPDATE_HOUR=03
