@@ -4,7 +4,7 @@
         <TargetFramework>net8.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <RootNamespace>docker_image_updater</RootNamespace>
+        <RootNamespace>MobySync</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
