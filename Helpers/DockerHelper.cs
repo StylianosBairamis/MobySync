@@ -39,6 +39,9 @@ public class DockerHelper
         _excludedContainers = excludedRaw
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (_excludedContainers.Count > 0)
+            _logger.LogInformation("Configured exclusions: {Excluded}", string.Join(", ", _excludedContainers));
     }
     
     public async Task<UpdateSummary> CheckForImageUpdates()

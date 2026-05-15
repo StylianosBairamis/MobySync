@@ -8,6 +8,8 @@ public class UpdateCoordinator(DockerHelper dockerHelper, IEnumerable<INotificat
     
     private async Task StartUpdateCycle()
     {
+        logger.LogInformation("Update cycle starting");
+
         var summary = await dockerHelper.CheckForImageUpdates();
 
         if (summary.HasChanges)

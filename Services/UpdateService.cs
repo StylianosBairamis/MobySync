@@ -11,47 +11,51 @@ public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateSe
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
         if (int.TryParse(Environment.GetEnvironmentVariable("UPDATE_HOUR"), out var hourParsed))
-        {
-            _updateHour = hourParsed; 
-        }
+            _updateHour = hourParsed;
         else
-        {
-            logger.LogInformation("UPDATE_HOUR variable is missing or invalid. Defaulting update hour to {Hour}", _updateHour);
-        }
-    
+            logger.LogInformation("UPDATE_HOUR variable is missing or invalid. Defaulting to {Hour}", _updateHour);
+
         if (int.TryParse(Environment.GetEnvironmentVariable("UPDATE_MINUTE"), out var minuteParsed))
+            _updateMinute = minuteParsed;
+        else
+            logger.LogInformation("UPDATE_MINUTE variable is missing or invalid. Defaulting to {Minute}", _updateMinute);
+
+        var timezone = TimeZoneInfo.Local;
+        var tzId = Environment.GetEnvironmentVariable("TZ");
+
+        if (!string.IsNullOrWhiteSpace(tzId))
         {
-            _updateMinute = minuteParsed; 
+            try
+            {
+                timezone = TimeZoneInfo.FindSystemTimeZoneById(tzId);
+                logger.LogInformation("Timezone set to {Timezone}", timezone.Id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                logger.LogWarning("Timezone '{TZ}' was not recognized. Defaulting to container local time ({Local})", tzId, TimeZoneInfo.Local.Id);
+            }
         }
         else
         {
-            logger.LogInformation("UPDATE_MINUTE variable is missing or invalid. Defaulting update minute to {Minute}", _updateMinute);
+            logger.LogWarning("TZ is not set. Defaulting to container local time ({Local})", TimeZoneInfo.Local.Id);
         }
 
-        logger.LogInformation("Daily updates are scheduled to run at {Hour:00}:{Minute:00} container time.",
-            _updateHour, _updateMinute);
-            
-        var timezone = Environment.GetEnvironmentVariable("TZ");
+        var nowInTz = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timezone);
+        logger.LogInformation("Current time: {Time:yyyy-MM-dd HH:mm:ss} ({Timezone})", nowInTz, timezone.Id);
+        logger.LogInformation("Daily updates scheduled at {Hour:D2}:{Minute:D2} ({Timezone})", _updateHour, _updateMinute, timezone.Id);
 
-        if (string.IsNullOrWhiteSpace(timezone))
-        {
-            logger.LogWarning("Timezone variable is not set, the update schedule will default to the container's native timezone.");
-        }
-        
         while (!cancellationToken.IsCancellationRequested)
         {
-            var dateTimeNow = DateTime.Now;
+            nowInTz = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timezone);
 
-            var scheduledTime = dateTimeNow.Date.AddHours(_updateHour)
-                                    .AddMinutes(_updateMinute);
-        
-            // If the set time is past the current, schedule it for next day.
-            if (dateTimeNow > scheduledTime)
-            {
-                scheduledTime = scheduledTime.AddDays(1);
-            }
-            
-            var delay = scheduledTime - dateTimeNow;
+            var scheduledInTz = new DateTime(nowInTz.Year, nowInTz.Month, nowInTz.Day, _updateHour, _updateMinute, 0, DateTimeKind.Unspecified);
+
+            if (nowInTz >= scheduledInTz)
+                scheduledInTz = scheduledInTz.AddDays(1);
+
+            logger.LogInformation("Next update at {ScheduledTime:yyyy-MM-dd HH:mm} ({Timezone})", scheduledInTz, timezone.Id);
+
+            var delay = TimeZoneInfo.ConvertTimeToUtc(scheduledInTz, timezone) - DateTime.UtcNow;
 
             await Task.Delay(delay, cancellationToken);
 
