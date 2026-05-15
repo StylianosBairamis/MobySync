@@ -53,7 +53,9 @@ public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateSe
             if (nowInTz >= scheduledInTz)
                 scheduledInTz = scheduledInTz.AddDays(1);
 
-            logger.LogInformation("Next update at {ScheduledTime:yyyy-MM-dd HH:mm} ({Timezone})", scheduledInTz, timezone.Id);
+            await updateCoordinator.SendStartupNotifications();
+
+        logger.LogInformation("Next update at {ScheduledTime:yyyy-MM-dd HH:mm} ({Timezone})", scheduledInTz, timezone.Id);
 
             var delay = TimeZoneInfo.ConvertTimeToUtc(scheduledInTz, timezone) - DateTime.UtcNow;
 

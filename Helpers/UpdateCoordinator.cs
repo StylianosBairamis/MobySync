@@ -29,6 +29,22 @@ public class UpdateCoordinator(DockerHelper dockerHelper, IEnumerable<INotificat
         }
     }
 
+    public async Task SendStartupNotifications()
+    {
+        foreach (var helper in notificationHelpers.Where(h => h.IsConfigured))
+        {
+            try
+            {
+                await helper.SendStartupTest();
+                logger.LogInformation("Startup test sent via {Provider}", helper.ProviderName);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to send startup test via {Provider}", helper.ProviderName);
+            }
+        }
+    }
+
     public async Task<bool> TryStartManualUpdate()
     {
         if (!await _updateProcessLock.WaitAsync(0))

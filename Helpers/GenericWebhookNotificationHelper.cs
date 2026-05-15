@@ -31,6 +31,37 @@ public class GenericWebhookNotificationHelper : INotificationHelper
         }
     }
 
+    public async Task SendStartupTest()
+    {
+        if (!IsConfigured)
+            return;
+
+        var payload = new
+        {
+            @event = "startup",
+            timestamp = DateTime.UtcNow,
+            message = "MobySync started. Webhook is configured and working."
+        };
+
+        var httpClient = _httpClientFactory.CreateClient();
+
+        try
+        {
+            var response = await httpClient.PostAsJsonAsync(WebhookUrl, payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Generic webhook returned non-success status {StatusCode}. Response: {Body}",
+                    response.StatusCode, body);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "A network error occurred while attempting to reach the generic webhook");
+        }
+    }
+
     public async Task SendSummary(Models.UpdateSummary summary)
     {
         if (!IsConfigured || !summary.HasChanges)
