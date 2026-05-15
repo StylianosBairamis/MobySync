@@ -19,5 +19,7 @@ services:
       UPDATE_HOUR: 23
       UPDATE_MINUTE: 30
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock      
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Optional: mount Docker credentials for private registries or authenticated DockerHub pulls.
+      # Remove or comment out if you only pull from public images.
       - ~/.docker/config.json:/app/creds/config.json:ro
