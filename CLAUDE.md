@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-MobySync is a C# ASP.NET Core 8 background service that auto-updates Docker containers in home lab or production environments. It monitors labeled containers, pulls new images, replaces containers atomically with rollback support, and sends Discord notifications.
+MobySync is a C# ASP.NET Core 8 background service that auto-updates Docker containers in home lab or production environments. It monitors all running containers (opt-out via `EXCLUDED_CONTAINERS`), pulls new images, replaces containers atomically with rollback support, and sends Discord notifications.
 
 ## Commands
 
@@ -37,7 +37,7 @@ The update cycle flows through three layers:
 
 ### Container Discovery & Labels
 
-Only containers with `com.mobysync.enable=true` are processed. Two additional labels control behavior:
+All running containers are processed unless listed in `EXCLUDED_CONTAINERS`. Two labels control per-container behavior:
 - `com.mobysync.target-tag` — the image tag to track (e.g., `latest`, `stable`)
 - `com.mobysync.depends-on` — comma-separated container names; determines update order via topological sort
 
@@ -61,7 +61,7 @@ Settings come from two sources that must both be correct:
 
 ### Credentials
 
-`CredentialsHelper` reads `/app/creds/config.json` (Docker's `config.json` format, mounted as a read-only volume). It decodes base64 credentials per registry and passes `AuthConfig` to Docker.DotNet pull calls. Falls back to anonymous pulls if the file is absent.
+`CredentialsHelper` reads `/app/creds/config.json` (Docker's `config.json` format, mounted as a read-only volume). It decodes base64 credentials per registry and passes `AuthConfig` to Docker.DotNet pull calls. Falls back to anonymous pulls if the file is absent. If a credentialed pull fails with an auth error, it retries anonymously — so public images still work even if config.json contains stale Docker Hub credentials.
 
 ### API
 

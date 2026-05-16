@@ -247,12 +247,25 @@ public class DockerHelper
                 }
 
                 var authCredentials = await _credentialsHelper.FetchCredentials(baseImageName);
+                var hasCredentials = !string.IsNullOrEmpty(authCredentials.Username);
 
-                await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
+                try
                 {
-                    FromImage = baseImageName,
-                    Tag = targetTag
-                }, authCredentials, new Progress<JSONMessage>());
+                    await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
+                    {
+                        FromImage = baseImageName,
+                        Tag = targetTag
+                    }, authCredentials, new Progress<JSONMessage>());
+                }
+                catch (Exception pullEx) when (IsAuthError(pullEx) && hasCredentials)
+                {
+                    _logger.LogWarning("Authenticated pull failed for {Image}, retrying anonymously", baseImageName);
+                    await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
+                    {
+                        FromImage = baseImageName,
+                        Tag = targetTag
+                    }, new AuthConfig(), new Progress<JSONMessage>());
+                }
 
                 var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{targetTag}");
 
@@ -276,12 +289,7 @@ public class DockerHelper
             }
             catch (Exception ex)
             {
-                var isAuthFailure = ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
-                    || ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
-                    || ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)
-                    || ex.Message.Contains("forbidden", StringComparison.OrdinalIgnoreCase);
-
-                var friendlyMessage = isAuthFailure
+                var friendlyMessage = IsAuthError(ex)
                     ? "Authentication failed — check registry credentials"
                     : ex.Message;
 
@@ -519,6 +527,12 @@ public class DockerHelper
         }
     }
     
+    private static bool IsAuthError(Exception ex) =>
+        ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("forbidden", StringComparison.OrdinalIgnoreCase);
+
     private string FetchBaseImageName(string imageFullPath)
     {
         var lastColonIndex = imageFullPath.LastIndexOf(':');
