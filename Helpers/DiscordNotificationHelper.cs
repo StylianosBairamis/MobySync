@@ -54,7 +54,7 @@ public class DiscordNotificationHelper : INotificationHelper
                 noChangeFields.Add(new
                 {
                     name = "⏭️ Skipped",
-                    value = string.Join("\n", summary.Skipped.Select(s => $"**{s.ContainerName}** (`{s.ImageName}`): {s.ErrorMessage}")),
+                    value = string.Join("\n", summary.Skipped.Select(s => $"• **{s.ContainerName}** (`{s.ImageName}`): {s.ErrorMessage}")),
                     inline = false
                 });
             }
@@ -85,7 +85,7 @@ public class DiscordNotificationHelper : INotificationHelper
                 fields.Add(new
                 {
                     name = "✅ Successful Updates",
-                    value = string.Join("\n", summary.Successes.Select(s => $"**{s.ContainerName}**: `{s.NewTag}`")),
+                    value = string.Join("\n", summary.Successes.Select(s => $"• **{s.ContainerName}**: `{s.NewTag}`")),
                     inline = false
                 });
             }
@@ -95,7 +95,7 @@ public class DiscordNotificationHelper : INotificationHelper
                 fields.Add(new
                 {
                     name = "⚠️ Rollbacks",
-                    value = string.Join("\n", summary.Rollbacks.Select(r => $"**{r.ContainerName}**: {r.ErrorMessage}")),
+                    value = string.Join("\n", summary.Rollbacks.Select(r => $"• **{r.ContainerName}**: {r.ErrorMessage}")),
                     inline = false
                 });
             }
@@ -105,7 +105,7 @@ public class DiscordNotificationHelper : INotificationHelper
                 fields.Add(new
                 {
                     name = "❌ Failed Pulls",
-                    value = string.Join("\n", summary.FailedPulls.Select(f => $"**{f.ContainerName}**: {f.ErrorMessage}")),
+                    value = string.Join("\n", summary.FailedPulls.Select(f => $"• **{f.ContainerName}**: {f.ErrorMessage}")),
                     inline = false
                 });
             }
@@ -115,7 +115,7 @@ public class DiscordNotificationHelper : INotificationHelper
                 fields.Add(new
                 {
                     name = "⏭️ Skipped",
-                    value = string.Join("\n", summary.Skipped.Select(s => $"**{s.ContainerName}** (`{s.ImageName}`): {s.ErrorMessage}")),
+                    value = string.Join("\n", summary.Skipped.Select(s => $"• **{s.ContainerName}** (`{s.ImageName}`): {s.ErrorMessage}")),
                     inline = false
                 });
             }
