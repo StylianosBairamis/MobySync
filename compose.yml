@@ -16,6 +16,12 @@ services:
       WEBHOOK_URL: ""
       # Set to "true" to remove dangling images from Docker after each update cycle
       PRUNE_IMAGES: "false"
+      # Optional: comma-separated tag overrides. Two formats:
+      #   stack:service:tag  → matches a specific Compose service  (e.g. memos:memos:stable)
+      #   image:tag          → matches any container using that image (e.g. neosmemo/memos:stable)
+      # Per-container labels (com.mobysync.target-tag) always take priority over these.
+      # Containers with no match fall back to "latest".
+      IMAGE_TAG_OVERRIDES: ""
       UPDATE_HOUR: 23
       UPDATE_MINUTE: 30
     volumes:

@@ -17,6 +17,10 @@ public class DockerHelper
 
     private readonly HashSet<string> _excludedContainers;
 
+    private readonly Dictionary<string, string> _stackTagOverrides;
+
+    private readonly Dictionary<string, string> _imageTagOverrides;
+
     public DockerHelper(ILogger<DockerHelper> logger, CredentialsHelper credentialsHelper)
     {
         var dockerSocketUri = new Uri("unix:///var/run/docker.sock");
@@ -42,6 +46,27 @@ public class DockerHelper
 
         if (_excludedContainers.Count > 0)
             _logger.LogInformation("Configured exclusions: {Excluded}", string.Join(", ", _excludedContainers));
+
+        _stackTagOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _imageTagOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var overridesRaw = Environment.GetEnvironmentVariable("IMAGE_TAG_OVERRIDES") ?? string.Empty;
+
+        foreach (var entry in overridesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = entry.Split(':');
+
+            if (parts.Length == 3)
+                _stackTagOverrides[$"{parts[0]}:{parts[1]}"] = parts[2];
+            else if (parts.Length == 2)
+                _imageTagOverrides[parts[0]] = parts[1];
+        }
+
+        if (_stackTagOverrides.Count > 0)
+            _logger.LogInformation("Stack tag overrides: {Overrides}", string.Join(", ", _stackTagOverrides.Select(kv => $"{kv.Key} → {kv.Value}")));
+
+        if (_imageTagOverrides.Count > 0)
+            _logger.LogInformation("Image tag overrides: {Overrides}", string.Join(", ", _imageTagOverrides.Select(kv => $"{kv.Key} → {kv.Value}")));
     }
     
     public async Task<UpdateSummary> CheckForImageUpdates()
@@ -221,13 +246,7 @@ public class DockerHelper
             var baseImageName = FetchBaseImageName(container.Image);
             var containerName = container.Names.First().Replace("/", "");
             
-            // Default tag in case of a misconfiguration by the user
-            var targetTag = "latest";
-                
-            if(container.Labels is not null && container.Labels.TryGetValue("com.mobysync.target-tag", out var targetTagParsed))
-            {
-                targetTag = targetTagParsed;
-            }
+            var targetTag = ResolveTargetTag(container, baseImageName);
 
             try
             {
@@ -321,14 +340,8 @@ public class DockerHelper
             
             var baseImageName = FetchBaseImageName(containerForUpdate.Image);
             
-            // Default tag in case of a misconfiguration by the user
-            var targetTag = "latest";
-                
-            if(containerForUpdate.Labels is not null && containerForUpdate.Labels.TryGetValue("com.mobysync.target-tag", out var targetTagParsed))
-            {
-                targetTag = targetTagParsed;
-            }
-            
+            var targetTag = ResolveTargetTag(containerForUpdate, baseImageName);
+
             var newContainerId = string.Empty;
             
             var originalName = containerForUpdate.Names.First().Replace("/", "");
@@ -527,6 +540,23 @@ public class DockerHelper
         }
     }
     
+    private string ResolveTargetTag(ContainerListResponse container, string baseImageName)
+    {
+        if (container.Labels != null && container.Labels.TryGetValue("com.mobysync.target-tag", out var labelTag))
+            return labelTag;
+
+        if (container.Labels != null
+            && container.Labels.TryGetValue("com.docker.compose.project", out var project)
+            && container.Labels.TryGetValue("com.docker.compose.service", out var service)
+            && _stackTagOverrides.TryGetValue($"{project}:{service}", out var stackTag))
+            return stackTag;
+
+        if (_imageTagOverrides.TryGetValue(baseImageName, out var imageTag))
+            return imageTag;
+
+        return "latest";
+    }
+
     private static bool IsAuthError(Exception ex) =>
         ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
