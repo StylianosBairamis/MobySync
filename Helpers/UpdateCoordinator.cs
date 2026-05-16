@@ -10,6 +10,12 @@ public class UpdateCoordinator(DockerHelper dockerHelper, IEnumerable<INotificat
     {
         logger.LogInformation("Update cycle starting");
 
+        foreach (var helper in notificationHelpers.Where(h => h.IsConfigured))
+        {
+            try { await helper.SendUpdateStarted(); }
+            catch (Exception ex) { logger.LogError(ex, "Failed to send update-started notification via {Provider}", helper.ProviderName); }
+        }
+
         var summary = await dockerHelper.CheckForImageUpdates();
 
         if (summary.HasChanges)

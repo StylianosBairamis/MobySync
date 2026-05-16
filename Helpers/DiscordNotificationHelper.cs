@@ -4,9 +4,9 @@ namespace MobySync.Helpers;
 
 public class DiscordNotificationHelper : INotificationHelper
 {
-    private readonly int _successColor = 3066993; 
-    
-    private readonly int _errorColor = 15158332; 
+    private readonly int _successColor = 3066993;
+    private readonly int _infoColor = 3447003;
+    private readonly int _errorColor = 15158332;
     public bool IsConfigured { get; }
     public string ProviderName { get; }
     public string WebhookUrl { get; } = string.Empty;
@@ -85,6 +85,26 @@ public class DiscordNotificationHelper : INotificationHelper
                     color = summary.Rollbacks.Any() || summary.FailedPulls.Any() ? _errorColor : _successColor,
                     fields = fields.ToArray(),
                     footer = new { text = $"Total duration: {summary.TotalDuration:mm\\:ss}" },
+                    timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                }
+            }
+        };
+
+        await PostToDiscordAsync(payload);
+    }
+
+    public async Task SendUpdateStarted()
+    {
+        var payload = new
+        {
+            username = "MobySync",
+            embeds = new[]
+            {
+                new
+                {
+                    title = "Update Cycle Starting",
+                    description = "Checking all containers for new images...",
+                    color = _infoColor,
                     timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
                 }
             }

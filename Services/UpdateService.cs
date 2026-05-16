@@ -44,6 +44,8 @@ public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateSe
         logger.LogInformation("Current time: {Time:yyyy-MM-dd HH:mm:ss} ({Timezone})", nowInTz, timezone.Id);
         logger.LogInformation("Daily updates scheduled at {Hour:D2}:{Minute:D2} ({Timezone})", _updateHour, _updateMinute, timezone.Id);
 
+        await updateCoordinator.SendStartupNotifications();
+
         while (!cancellationToken.IsCancellationRequested)
         {
             nowInTz = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timezone);
@@ -53,9 +55,7 @@ public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateSe
             if (nowInTz >= scheduledInTz)
                 scheduledInTz = scheduledInTz.AddDays(1);
 
-            await updateCoordinator.SendStartupNotifications();
-
-        logger.LogInformation("Next update at {ScheduledTime:yyyy-MM-dd HH:mm} ({Timezone})", scheduledInTz, timezone.Id);
+            logger.LogInformation("Next update at {ScheduledTime:yyyy-MM-dd HH:mm} ({Timezone})", scheduledInTz, timezone.Id);
 
             var delay = TimeZoneInfo.ConvertTimeToUtc(scheduledInTz, timezone) - DateTime.UtcNow;
 
