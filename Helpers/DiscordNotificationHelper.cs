@@ -39,56 +39,80 @@ public class DiscordNotificationHelper : INotificationHelper
 
     public async Task SendSummary(Models.UpdateSummary summary)
     {
-        if (!summary.HasChanges) 
-            return;
+        object payload;
 
-        var fields = new List<object>();
-
-        if (summary.Successes.Any())
+        if (!summary.HasChanges)
         {
-            fields.Add(new
-            {
-                name = "✅ Successful Updates",
-                value = string.Join("\n", summary.Successes.Select(s => $"**{s.ContainerName}**: `{s.NewTag}`")),
-                inline = false
-            });
-        }
+            var description = summary.UpToDate.Any()
+                ? $"All containers are up to date.\n{string.Join(", ", summary.UpToDate.Select(n => $"`{n}`"))}"
+                : "No containers were found to monitor.";
 
-        if (summary.Rollbacks.Any())
-        {
-            fields.Add(new
+            payload = new
             {
-                name = "⚠️ Rollbacks",
-                value = string.Join("\n", summary.Rollbacks.Select(r => $"**{r.ContainerName}**: {r.ErrorMessage}")),
-                inline = false
-            });
-        }
-
-        if (summary.FailedPulls.Any())
-        {
-            fields.Add(new
-            {
-                name = "❌ Failed Pulls",
-                value = string.Join("\n", summary.FailedPulls.Select(f => $"**{f.ContainerName}**: {f.ErrorMessage}")),
-                inline = false
-            });
-        }
-
-        var payload = new
-        {
-            username = "MobySync",
-            embeds = new[]
-            {
-                new
+                username = "MobySync",
+                embeds = new[]
                 {
-                    title = "Update Cycle Summary",
-                    color = summary.Rollbacks.Any() || summary.FailedPulls.Any() ? _errorColor : _successColor,
-                    fields = fields.ToArray(),
-                    footer = new { text = $"Total duration: {summary.TotalDuration:mm\\:ss}" },
-                    timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                    new
+                    {
+                        title = "Update Cycle Complete",
+                        description,
+                        color = _infoColor,
+                        footer = new { text = $"Total duration: {summary.TotalDuration:mm\\:ss}" },
+                        timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                    }
                 }
+            };
+        }
+        else
+        {
+            var fields = new List<object>();
+
+            if (summary.Successes.Any())
+            {
+                fields.Add(new
+                {
+                    name = "✅ Successful Updates",
+                    value = string.Join("\n", summary.Successes.Select(s => $"**{s.ContainerName}**: `{s.NewTag}`")),
+                    inline = false
+                });
             }
-        };
+
+            if (summary.Rollbacks.Any())
+            {
+                fields.Add(new
+                {
+                    name = "⚠️ Rollbacks",
+                    value = string.Join("\n", summary.Rollbacks.Select(r => $"**{r.ContainerName}**: {r.ErrorMessage}")),
+                    inline = false
+                });
+            }
+
+            if (summary.FailedPulls.Any())
+            {
+                fields.Add(new
+                {
+                    name = "❌ Failed Pulls",
+                    value = string.Join("\n", summary.FailedPulls.Select(f => $"**{f.ContainerName}**: {f.ErrorMessage}")),
+                    inline = false
+                });
+            }
+
+            payload = new
+            {
+                username = "MobySync",
+                embeds = new[]
+                {
+                    new
+                    {
+                        title = "Update Cycle Summary",
+                        color = summary.Rollbacks.Any() || summary.FailedPulls.Any() ? _errorColor : _successColor,
+                        fields = fields.ToArray(),
+                        footer = new { text = $"Total duration: {summary.TotalDuration:mm\\:ss}" },
+                        timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                    }
+                }
+            };
+        }
 
         await PostToDiscordAsync(payload);
     }

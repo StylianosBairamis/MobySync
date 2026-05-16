@@ -95,7 +95,7 @@ public class GenericWebhookNotificationHelper : INotificationHelper
 
     public async Task SendSummary(Models.UpdateSummary summary)
     {
-        if (!IsConfigured || !summary.HasChanges)
+        if (!IsConfigured)
             return;
 
         var payload = new

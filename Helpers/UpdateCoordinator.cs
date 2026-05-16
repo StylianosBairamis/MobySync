@@ -18,19 +18,16 @@ public class UpdateCoordinator(DockerHelper dockerHelper, IEnumerable<INotificat
 
         var summary = await dockerHelper.CheckForImageUpdates();
 
-        if (summary.HasChanges)
+        foreach (var notificationHelper in notificationHelpers.Where(helper => helper.IsConfigured))
         {
-            foreach (var notificationHelper in notificationHelpers.Where(helper => helper.IsConfigured))
+            try
             {
-                try
-                {
-                    await notificationHelper.SendSummary(summary);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "An unexpected error occurred while trying to send a notification via provider: " +
-                                        "{Provider}", notificationHelper.ProviderName);
-                }
+                await notificationHelper.SendSummary(summary);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An unexpected error occurred while trying to send a notification via provider: " +
+                                    "{Provider}", notificationHelper.ProviderName);
             }
         }
     }

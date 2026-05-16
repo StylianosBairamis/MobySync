@@ -59,6 +59,9 @@ public class UpdateService(UpdateCoordinator updateCoordinator, ILogger<UpdateSe
 
             var delay = TimeZoneInfo.ConvertTimeToUtc(scheduledInTz, timezone) - DateTime.UtcNow;
 
+            if (delay < TimeSpan.Zero)
+                delay = TimeSpan.Zero;
+
             await Task.Delay(delay, cancellationToken);
 
             await updateCoordinator.ExecuteScheduledUpdate();
