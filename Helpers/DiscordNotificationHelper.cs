@@ -47,6 +47,18 @@ public class DiscordNotificationHelper : INotificationHelper
                 ? $"All containers are up to date.\n{string.Join(", ", summary.UpToDate.Select(n => $"`{n}`"))}"
                 : "No containers were found to monitor.";
 
+            var noChangeFields = new List<object>();
+
+            if (summary.Skipped.Any())
+            {
+                noChangeFields.Add(new
+                {
+                    name = "⏭️ Skipped",
+                    value = string.Join("\n", summary.Skipped.Select(s => $"**{s.ContainerName}** (`{s.ImageName}`): {s.ErrorMessage}")),
+                    inline = false
+                });
+            }
+
             payload = new
             {
                 username = "MobySync",
@@ -57,6 +69,7 @@ public class DiscordNotificationHelper : INotificationHelper
                         title = "Update Cycle Complete",
                         description,
                         color = _infoColor,
+                        fields = noChangeFields.ToArray(),
                         footer = new { text = $"Total duration: {summary.TotalDuration:mm\\:ss}" },
                         timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
                     }
@@ -93,6 +106,16 @@ public class DiscordNotificationHelper : INotificationHelper
                 {
                     name = "❌ Failed Pulls",
                     value = string.Join("\n", summary.FailedPulls.Select(f => $"**{f.ContainerName}**: {f.ErrorMessage}")),
+                    inline = false
+                });
+            }
+
+            if (summary.Skipped.Any())
+            {
+                fields.Add(new
+                {
+                    name = "⏭️ Skipped",
+                    value = string.Join("\n", summary.Skipped.Select(s => $"**{s.ContainerName}** (`{s.ImageName}`): {s.ErrorMessage}")),
                     inline = false
                 });
             }

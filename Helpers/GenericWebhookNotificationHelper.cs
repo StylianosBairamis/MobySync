@@ -122,6 +122,12 @@ public class GenericWebhookNotificationHelper : INotificationHelper
                 image = f.ImageName,
                 error = f.ErrorMessage
             }),
+            skipped = summary.Skipped.Select(s => new
+            {
+                container = s.ContainerName,
+                image = s.ImageName,
+                reason = s.ErrorMessage
+            }),
             upToDate = summary.UpToDate
         };
 

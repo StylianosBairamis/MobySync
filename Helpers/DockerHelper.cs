@@ -231,44 +231,67 @@ public class DockerHelper
 
             try
             {
+                // Locally built images have no registry digest — skip them rather than failing the group
+                var runningImageInfo = await _dockerClient.Images.InspectImageAsync(container.ImageID);
+                if (runningImageInfo.RepoDigests == null || !runningImageInfo.RepoDigests.Any())
+                {
+                    _logger.LogInformation("Container {Container} uses a locally built image ({Image}), skipping", containerName, baseImageName);
+                    summary.Skipped.Add(new ContainerUpdateResult
+                    {
+                        ContainerName = containerName,
+                        ImageName = baseImageName,
+                        ErrorMessage = "Locally built image — cannot check for updates",
+                        Success = false
+                    });
+                    continue;
+                }
+
                 var authCredentials = await _credentialsHelper.FetchCredentials(baseImageName);
-                
+
                 await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
                 {
                     FromImage = baseImageName,
                     Tag = targetTag
                 }, authCredentials, new Progress<JSONMessage>());
-                
+
                 var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{targetTag}");
 
                 var pulledImageId = pulledImageInformation.ID;
-                
+
                 var runningImageId = container.ImageID;
 
                 if (runningImageId != pulledImageId)
                 {
                     outdatedContainers.Add(container);
-                    
-                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}", 
+
+                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}",
                         baseImageName, pulledImageId);
                 }
                 else
                 {
-                    _logger.LogInformation("Container {Container} is already running the latest version ", containerName);
-                    
+                    _logger.LogInformation("Container {Container} is already running the latest version", containerName);
+
                     summary.UpToDate.Add(containerName);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "An unexpected error occurred while trying to pull {Image}. Aborting group update.", 
-                    baseImageName);
+                var isAuthFailure = ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+                    || ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+                    || ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)
+                    || ex.Message.Contains("forbidden", StringComparison.OrdinalIgnoreCase);
+
+                var friendlyMessage = isAuthFailure
+                    ? "Authentication failed — check registry credentials"
+                    : ex.Message;
+
+                _logger.LogError(ex, "Failed to pull {Image}. Aborting group update.", baseImageName);
 
                 summary.FailedPulls.Add(new ContainerUpdateResult
                 {
                     ContainerName = containerName,
                     ImageName = baseImageName,
-                    ErrorMessage = ex.Message,
+                    ErrorMessage = friendlyMessage,
                     Success = false
                 });
 
