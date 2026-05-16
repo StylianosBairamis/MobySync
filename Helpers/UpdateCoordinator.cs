@@ -8,6 +8,8 @@ public class UpdateCoordinator(DockerHelper dockerHelper, IEnumerable<INotificat
     
     private async Task StartUpdateCycle()
     {
+        logger.LogInformation("Update cycle starting");
+
         var summary = await dockerHelper.CheckForImageUpdates();
 
         if (summary.HasChanges)
@@ -23,6 +25,22 @@ public class UpdateCoordinator(DockerHelper dockerHelper, IEnumerable<INotificat
                     logger.LogError(ex, "An unexpected error occurred while trying to send a notification via provider: " +
                                         "{Provider}", notificationHelper.ProviderName);
                 }
+            }
+        }
+    }
+
+    public async Task SendStartupNotifications()
+    {
+        foreach (var helper in notificationHelpers.Where(h => h.IsConfigured))
+        {
+            try
+            {
+                await helper.SendStartupTest();
+                logger.LogInformation("Startup test sent via {Provider}", helper.ProviderName);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to send startup test via {Provider}", helper.ProviderName);
             }
         }
     }

@@ -85,7 +85,27 @@ public class DiscordNotificationHelper : INotificationHelper
                     color = summary.Rollbacks.Any() || summary.FailedPulls.Any() ? _errorColor : _successColor,
                     fields = fields.ToArray(),
                     footer = new { text = $"Total duration: {summary.TotalDuration:mm\\:ss}" },
-                    timestamp = DateTime.Now
+                    timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                }
+            }
+        };
+
+        await PostToDiscordAsync(payload);
+    }
+
+    public async Task SendStartupTest()
+    {
+        var payload = new
+        {
+            username = "MobySync",
+            embeds = new[]
+            {
+                new
+                {
+                    title = "MobySync Started",
+                    description = "Webhook is configured and working.",
+                    color = _successColor,
+                    timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
                 }
             }
         };

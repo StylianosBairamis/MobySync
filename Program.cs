@@ -12,6 +12,7 @@ builder.Services.AddSingleton<DockerHelper>();
 builder.Services.AddSingleton<UpdateCoordinator>();
 builder.Services.AddSingleton<CredentialsHelper>();
 builder.Services.AddSingleton<INotificationHelper, DiscordNotificationHelper>();
+builder.Services.AddSingleton<INotificationHelper, GenericWebhookNotificationHelper>();
 
 builder.Services.AddHostedService<UpdateService>();
 

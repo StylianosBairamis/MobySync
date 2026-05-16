@@ -8,29 +8,40 @@ namespace MobySync.Helpers;
 public class DockerHelper
 {
     private readonly DockerClient _dockerClient;
-    
+
     private readonly ILogger<DockerHelper> _logger;
-    
+
     private readonly CredentialsHelper _credentialsHelper;
-    
+
     private bool _pruneImages;
-    
+
+    private readonly HashSet<string> _excludedContainers;
+
     public DockerHelper(ILogger<DockerHelper> logger, CredentialsHelper credentialsHelper)
     {
         var dockerSocketUri = new Uri("unix:///var/run/docker.sock");
 
         _dockerClient = new DockerClientConfiguration(dockerSocketUri).CreateClient();
-        
+
         _logger = logger;
-        
-        _credentialsHelper = credentialsHelper; 
-        
+
+        _credentialsHelper = credentialsHelper;
+
         _pruneImages = false;
 
         if (bool.TryParse(Environment.GetEnvironmentVariable("PRUNE_IMAGES"), out var pruneImagesParsed))
         {
             _pruneImages = pruneImagesParsed;
         }
+
+        var excludedRaw = Environment.GetEnvironmentVariable("EXCLUDED_CONTAINERS") ?? string.Empty;
+
+        _excludedContainers = excludedRaw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (_excludedContainers.Count > 0)
+            _logger.LogInformation("Configured exclusions: {Excluded}", string.Join(", ", _excludedContainers));
     }
     
     public async Task<UpdateSummary> CheckForImageUpdates()
@@ -84,36 +95,48 @@ public class DockerHelper
     private async Task<List<ContainerListResponse>?> GetMonitoredContainers()
     {
         var allContainers = await _dockerClient.Containers.ListContainersAsync(new ContainersListParameters { All = true });
-        
-        var monitoredContainers = allContainers
-            .Where(container => container.State == "running")
-            .Where(container => 
+
+        var runningContainers = allContainers.Where(c => c.State == "running").ToList();
+
+        // Auto-detect own container by matching the Docker-assigned hostname (= short container ID)
+        var selfName = string.Empty;
+        try
+        {
+            var hostname = Environment.MachineName;
+            var self = runningContainers.FirstOrDefault(c => c.ID.StartsWith(hostname, StringComparison.OrdinalIgnoreCase));
+            if (self is not null)
             {
-                if (container.Labels is not null && container.Labels.TryGetValue("com.mobysync.enable", out var isEnabledStr))
-                {
-                    bool.TryParse(isEnabledStr, out var isEnabled) ;
-                    
-                    return isEnabled;
-                }
-            
-                return false;
-            })
+                selfName = self.Names.First().TrimStart('/');
+                _logger.LogInformation("Auto-excluding self: {Name}", selfName);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not detect own container — skipping self-exclusion");
+        }
+
+        var excluded = new HashSet<string>(_excludedContainers, StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(selfName))
+            excluded.Add(selfName);
+
+        var monitoredContainers = runningContainers
+            .Where(c => !excluded.Contains(c.Names.First().TrimStart('/')))
             .ToList();
 
-        if (monitoredContainers.Any())
+        if (excluded.Count > 0)
+            _logger.LogInformation("Excluded containers: {Names}", string.Join(", ", excluded));
+
+        if (!monitoredContainers.Any())
         {
-            _logger.LogInformation("Found {Count} containers configured for monitoring.", monitoredContainers.Count);
-    
-            var containerNames = string.Join(", ", monitoredContainers.Select(container => container.Names.First().Replace("/", "")));
-            
-            _logger.LogInformation("Monitored containers: {Names}", containerNames);
-            
-            return monitoredContainers;
+            _logger.LogWarning("No running containers found to monitor");
+            return null;
         }
-        
-        _logger.LogWarning("No containers were found in running state and monitoring enabled");
-            
-        return null;
+
+        _logger.LogInformation("Found {Count} containers to monitor: {Names}",
+            monitoredContainers.Count,
+            string.Join(", ", monitoredContainers.Select(c => c.Names.First().TrimStart('/'))));
+
+        return monitoredContainers;
     }
     
     private Dictionary<string, List<ContainerListResponse>> GroupDependentContainers(IList<ContainerListResponse> monitoredContainers)

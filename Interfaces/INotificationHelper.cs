@@ -8,4 +8,5 @@ public interface INotificationHelper
     string ProviderName { get; }
     string WebhookUrl { get; }
     Task SendSummary(UpdateSummary summary);
+    Task SendStartupTest();
 }
