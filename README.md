@@ -1,22 +1,40 @@
-#  MobySync
+# MobySync
 
-MobySync is a lightweight Docker image auto-updater designed for home labs and production environments. 
-It monitors your running containers, pulls new images, and safely replaces containers while respecting dependency chains and providing automatic rollbacks on failure.
+**MobySync** is a lightweight, high-performance Docker container auto-updater designed for home labs and production environments. It monitors your running containers, intelligently pulls new images, and safely replaces containers while respecting dependency chains and providing automated rollbacks on failure.
 
----
-
-##  Key Features
-
-- **Automated Updates:** Schedule daily updates at specific times (e.g., 3:30 AM).
-- **Dependency Management:** Define update orders using labels (e.g., ensure your database updates before your web app).
-- **Safety First:** Automatic rollback to the previous container state if an update fails or the new container crashes.
-- **Manual Triggers:** REST API endpoint to force an update cycle instantly.
-- **Notifications:** Integrated Discord webhook support for success and failure alerts.
-- **Housekeeping:** Optional automatic image pruning to save disk space.
+Built with .NET 8, MobySync is designed to be a "set-and-forget" solution for keeping your Docker stack up-to-date with minimal manual intervention.
 
 ---
 
-##  Configuration
+## Key Features
+
+- **Safety First:** Automatic rollback to the previous container state if an update fails or if the new container crashes within 10 seconds of starting.
+- **Dependency Awareness:** Respects container dependencies (via labels) to ensure services update in the correct order (e.g., Database before Web App).
+- **Flexible Scheduling:** Define exactly when updates should occur using Cron-like hour/minute settings and Timezone support.
+- **Registry Support:** Seamlessly handles private registries using your existing Docker `config.json`.
+- **Smart Tag Tracking:** Track specific tags (`latest`, `stable`, etc.) per container.
+- **Rich Notifications:** Native support for Discord webhooks and generic JSON webhooks for startup, start-of-cycle, and detailed summaries.
+- **Housekeeping:** Optional automatic pruning of old images after a successful update cycle.
+- **Manual Triggers:** REST API endpoint to force an update cycle instantly, protected by API Key authentication.
+- **Fine-grained Control:** Exclude specific containers or override tags globally or per-service.
+
+---
+
+## How It Works
+
+1. **Discovery:** MobySync scans for all running containers, excluding itself and any containers specified in `EXCLUDED_CONTAINERS`.
+2. **Dependency Mapping:** It builds a dependency graph using the `com.mobysync.depends-on` label to determine the safe update order.
+3. **Image Verification:** For each monitored container, it checks for a newer version of the image on the registry.
+4. **The Update Cycle:**
+   - Stops and renames the old container to a backup name.
+   - Pulls the new image (respecting credentials).
+   - Creates and starts a new container with the exact same configuration.
+   - **Health Check:** Waits 10 seconds to ensure the new container doesn't crash.
+5. **Finalization:** On success, the backup container is removed. On failure, MobySync automatically performs a rollback of the current group to ensure system stability.
+
+---
+
+## Configuration
 
 ### Environment Variables
 
@@ -27,21 +45,25 @@ It monitors your running containers, pulls new images, and safely replaces conta
 | `UPDATE_MINUTE` | Minute of the hour to run updates (0-59) | `30` |
 | `TZ` | Timezone for the update schedule (e.g., `Europe/London`) | `UTC` |
 | `PRUNE_IMAGES` | Set to `true` to remove old images after updates | `false` |
-| `DISCORD_WEBHOOK_URL` | URL for Discord notifications | - |
+| `EXCLUDED_CONTAINERS`| Comma-separated list of container names to ignore | - |
+| `IMAGE_TAG_OVERRIDES`| Global tag overrides (see [Advanced Configuration](#advanced-configuration)) | - |
+| `DISCORD_WEBHOOK_URL`| URL for Discord notifications | - |
+| `WEBHOOK_URL` | URL for generic JSON webhook notifications | - |
 
 ### Container Labels
 
-MobySync only monitors containers that you explicitly authorize via labels:
+By default, MobySync monitors **all running containers**. You can use labels to fine-tune update behavior:
 
 | Label | Description | Example |
 | :--- | :--- | :--- |
-| `com.mobysync.enable` | Enable monitoring for this container | `true` |
-| `com.mobysync.target-tag` | The specific tag to track | `latest` or `stable` |
-| `com.mobysync.depends-on` | Comma-separated list of container names | `db-container,redis-cache` |
+| `com.mobysync.target-tag` | The specific tag to track | `latest` or `1.2-stable` |
+| `com.mobysync.depends-on` | Comma-separated list of container names this depends on | `db, redis` |
 
 ---
 
-##  Deployment
+## Deployment
+
+### Docker Compose
 
 ```yaml
 services:
@@ -49,26 +71,45 @@ services:
     image: steliosbairam/mobysync:latest
     container_name: mobysync
     restart: unless-stopped
+    ports:
+      - "5080:5080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./config/config.json:/app/creds/config.json:ro
+      # Optional: mount Docker credentials for private registries
+      - ~/.docker/config.json:/app/creds/config.json:ro
     environment:
       - API_KEY=your_secure_random_key
       - UPDATE_HOUR=03
       - UPDATE_MINUTE=00
-      - TZ=America/New_York
+      - TZ=Europe/Athens
       - PRUNE_IMAGES=true
       - DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-    ports:
-      - "5080:5080"
+      - EXCLUDED_CONTAINERS=portainer,nginx-proxy
 ```
+
+---
+
+## Advanced Configuration
+
+### Tag Overrides
+You can override tags globally or for specific docker-compose services using the `IMAGE_TAG_OVERRIDES` environment variable. 
+
+> **Note:** Per-container labels (`com.mobysync.target-tag`) always take priority over these overrides. Containers with no match fall back to `latest`.
+
+**Format:** `project:service:tag,image_name:tag`
+
+- `my-stack:web:beta`: Overrides the `web` service in the `my-stack` project to use the `beta` tag.
+- `nginx:alpine`: Overrides any container using the `nginx` image to use the `alpine` tag.
+
+### Exclusions
+By default, MobySync excludes itself. You can add more containers to the exclusion list using `EXCLUDED_CONTAINERS=container1,container2`.
 
 ---
 
 ## API Reference
 
 ### Trigger Manual Update
-Instantly starts a check for all monitored containers.
+Instantly starts an update cycle.
 
 - **URL:** `/api/update/trigger`
 - **Method:** `POST`
@@ -81,6 +122,17 @@ Instantly starts a check for all monitored containers.
 
 ---
 
+## Notifications
+
+### Discord
+Provides rich embeds showing exactly what was updated, what was skipped, and any errors encountered.
+
+### Generic Webhook
+Sends a POST request with a JSON payload. Useful for integrating with Home Assistant, Gotify, or custom dashboards.
+
+**Events sent:** `startup`, `update_started`, `update_cycle`.
+
+---
 
 ## License
 
