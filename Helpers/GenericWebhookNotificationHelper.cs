@@ -31,6 +31,37 @@ public class GenericWebhookNotificationHelper : INotificationHelper
         }
     }
 
+    public async Task SendUpdateStarted()
+    {
+        if (!IsConfigured)
+            return;
+
+        var payload = new
+        {
+            @event = "update_started",
+            timestamp = DateTime.UtcNow,
+            message = "Update cycle starting. Checking all containers for new images."
+        };
+
+        var httpClient = _httpClientFactory.CreateClient();
+
+        try
+        {
+            var response = await httpClient.PostAsJsonAsync(WebhookUrl, payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Generic webhook returned non-success status {StatusCode}. Response: {Body}",
+                    response.StatusCode, body);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "A network error occurred while attempting to reach the generic webhook");
+        }
+    }
+
     public async Task SendStartupTest()
     {
         if (!IsConfigured)
@@ -64,7 +95,7 @@ public class GenericWebhookNotificationHelper : INotificationHelper
 
     public async Task SendSummary(Models.UpdateSummary summary)
     {
-        if (!IsConfigured || !summary.HasChanges)
+        if (!IsConfigured)
             return;
 
         var payload = new
@@ -90,6 +121,12 @@ public class GenericWebhookNotificationHelper : INotificationHelper
                 container = f.ContainerName,
                 image = f.ImageName,
                 error = f.ErrorMessage
+            }),
+            skipped = summary.Skipped.Select(s => new
+            {
+                container = s.ContainerName,
+                image = s.ImageName,
+                reason = s.ErrorMessage
             }),
             upToDate = summary.UpToDate
         };

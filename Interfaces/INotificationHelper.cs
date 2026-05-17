@@ -9,4 +9,5 @@ public interface INotificationHelper
     string WebhookUrl { get; }
     Task SendSummary(UpdateSummary summary);
     Task SendStartupTest();
+    Task SendUpdateStarted();
 }
