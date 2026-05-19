@@ -319,13 +319,14 @@ public class DockerHelper
                 }
                 catch (Exception pullEx) when (IsAuthError(pullEx))
                 {
-                    // Daemon may be using its own stale cached credentials; retry with explicit empty auth
+                    // Daemon may be using its own stale cached credentials; retry with a fully empty AuthConfig
+                    // so the daemon has no server address hint to look up its own credential store.
                     _logger.LogWarning("Pull failed for {Image} (possible stale daemon credentials), retrying anonymously", baseImageName);
                     await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
                     {
                         FromImage = baseImageName,
                         Tag = targetTag
-                    }, new AuthConfig { ServerAddress = authCredentials.ServerAddress }, new Progress<JSONMessage>());
+                    }, new AuthConfig(), new Progress<JSONMessage>());
                 }
 
                 _logger.LogInformation("Successfully pulled new version of {Image}:{Tag}", baseImageName, targetTag);
