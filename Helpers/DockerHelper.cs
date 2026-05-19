@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using MobySync.Models;
 using Docker.DotNet;
 using Docker.DotNet.Models;
@@ -8,29 +9,65 @@ namespace MobySync.Helpers;
 public class DockerHelper
 {
     private readonly DockerClient _dockerClient;
-    
+
     private readonly ILogger<DockerHelper> _logger;
-    
+
     private readonly CredentialsHelper _credentialsHelper;
-    
+
     private bool _pruneImages;
-    
+
+    private readonly HashSet<string> _excludedContainers;
+
+    private readonly Dictionary<string, string> _stackTagOverrides;
+
+    private readonly Dictionary<string, string> _imageTagOverrides;
+
     public DockerHelper(ILogger<DockerHelper> logger, CredentialsHelper credentialsHelper)
     {
         var dockerSocketUri = new Uri("unix:///var/run/docker.sock");
 
         _dockerClient = new DockerClientConfiguration(dockerSocketUri).CreateClient();
-        
+
         _logger = logger;
-        
-        _credentialsHelper = credentialsHelper; 
-        
+
+        _credentialsHelper = credentialsHelper;
+
         _pruneImages = false;
 
         if (bool.TryParse(Environment.GetEnvironmentVariable("PRUNE_IMAGES"), out var pruneImagesParsed))
         {
             _pruneImages = pruneImagesParsed;
         }
+
+        var excludedRaw = Environment.GetEnvironmentVariable("EXCLUDED_CONTAINERS") ?? string.Empty;
+
+        _excludedContainers = excludedRaw
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (_excludedContainers.Count > 0)
+            _logger.LogInformation("Configured exclusions: {Excluded}", string.Join(", ", _excludedContainers));
+
+        _stackTagOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _imageTagOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var overridesRaw = Environment.GetEnvironmentVariable("IMAGE_TAG_OVERRIDES") ?? string.Empty;
+
+        foreach (var entry in overridesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = entry.Split(':');
+
+            if (parts.Length == 3)
+                _stackTagOverrides[$"{parts[0]}:{parts[1]}"] = parts[2];
+            else if (parts.Length == 2)
+                _imageTagOverrides[parts[0]] = parts[1];
+        }
+
+        if (_stackTagOverrides.Count > 0)
+            _logger.LogInformation("Stack tag overrides: {Overrides}", string.Join(", ", _stackTagOverrides.Select(kv => $"{kv.Key} → {kv.Value}")));
+
+        if (_imageTagOverrides.Count > 0)
+            _logger.LogInformation("Image tag overrides: {Overrides}", string.Join(", ", _imageTagOverrides.Select(kv => $"{kv.Key} → {kv.Value}")));
     }
     
     public async Task<UpdateSummary> CheckForImageUpdates()
@@ -84,36 +121,48 @@ public class DockerHelper
     private async Task<List<ContainerListResponse>?> GetMonitoredContainers()
     {
         var allContainers = await _dockerClient.Containers.ListContainersAsync(new ContainersListParameters { All = true });
-        
-        var monitoredContainers = allContainers
-            .Where(container => container.State == "running")
-            .Where(container => 
+
+        var runningContainers = allContainers.Where(c => c.State == "running").ToList();
+
+        // Auto-detect own container by matching the Docker-assigned hostname (= short container ID)
+        var selfName = string.Empty;
+        try
+        {
+            var hostname = Environment.MachineName;
+            var self = runningContainers.FirstOrDefault(c => c.ID.StartsWith(hostname, StringComparison.OrdinalIgnoreCase));
+            if (self is not null)
             {
-                if (container.Labels is not null && container.Labels.TryGetValue("com.mobysync.enable", out var isEnabledStr))
-                {
-                    bool.TryParse(isEnabledStr, out var isEnabled) ;
-                    
-                    return isEnabled;
-                }
-            
-                return false;
-            })
+                selfName = self.Names.First().TrimStart('/');
+                _logger.LogInformation("Auto-excluding self: {Name}", selfName);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not detect own container — skipping self-exclusion");
+        }
+
+        var excluded = new HashSet<string>(_excludedContainers, StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(selfName))
+            excluded.Add(selfName);
+
+        var monitoredContainers = runningContainers
+            .Where(c => !excluded.Contains(c.Names.First().TrimStart('/')))
             .ToList();
 
-        if (monitoredContainers.Any())
+        if (excluded.Count > 0)
+            _logger.LogInformation("Excluded containers: {Names}", string.Join(", ", excluded));
+
+        if (!monitoredContainers.Any())
         {
-            _logger.LogInformation("Found {Count} containers configured for monitoring.", monitoredContainers.Count);
-    
-            var containerNames = string.Join(", ", monitoredContainers.Select(container => container.Names.First().Replace("/", "")));
-            
-            _logger.LogInformation("Monitored containers: {Names}", containerNames);
-            
-            return monitoredContainers;
+            _logger.LogWarning("No running containers found to monitor");
+            return null;
         }
-        
-        _logger.LogWarning("No containers were found in running state and monitoring enabled");
-            
-        return null;
+
+        _logger.LogInformation("Found {Count} containers to monitor: {Names}",
+            monitoredContainers.Count,
+            string.Join(", ", monitoredContainers.Select(c => c.Names.First().TrimStart('/'))));
+
+        return monitoredContainers;
     }
     
     private Dictionary<string, List<ContainerListResponse>> GroupDependentContainers(IList<ContainerListResponse> monitoredContainers)
@@ -198,54 +247,92 @@ public class DockerHelper
             var baseImageName = FetchBaseImageName(container.Image);
             var containerName = container.Names.First().Replace("/", "");
             
-            // Default tag in case of a misconfiguration by the user
-            var targetTag = "latest";
-                
-            if(container.Labels is not null && container.Labels.TryGetValue("com.mobysync.target-tag", out var targetTagParsed))
+            var targetTag = ResolveTargetTag(container, baseImageName);
+
+            if (IsPinnedVersionTag(targetTag))
             {
-                targetTag = targetTagParsed;
+                _logger.LogInformation("Container {Container} uses pinned version tag ({Tag}), skipping", containerName, targetTag);
+                summary.Skipped.Add(new ContainerUpdateResult
+                {
+                    ContainerName = containerName,
+                    ImageName = baseImageName,
+                    ErrorMessage = $"Pinned version tag `{targetTag}` — skipping auto-update",
+                    Success = false
+                });
+                continue;
             }
 
             try
             {
-                var authCredentials = await _credentialsHelper.FetchCredentials(baseImageName);
-                
-                await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
+                // Locally built images have no registry digest — skip them rather than failing the group
+                var runningImageInfo = await _dockerClient.Images.InspectImageAsync(container.ImageID);
+                if (runningImageInfo.RepoDigests == null || !runningImageInfo.RepoDigests.Any())
                 {
-                    FromImage = baseImageName,
-                    Tag = targetTag
-                }, authCredentials, new Progress<JSONMessage>());
-                
+                    _logger.LogInformation("Container {Container} uses a locally built image ({Image}), skipping", containerName, baseImageName);
+                    summary.Skipped.Add(new ContainerUpdateResult
+                    {
+                        ContainerName = containerName,
+                        ImageName = baseImageName,
+                        ErrorMessage = "Locally built image — cannot check for updates",
+                        Success = false
+                    });
+                    continue;
+                }
+
+                var authCredentials = await _credentialsHelper.FetchCredentials(baseImageName);
+                var hasCredentials = !string.IsNullOrEmpty(authCredentials.Username);
+
+                try
+                {
+                    await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
+                    {
+                        FromImage = baseImageName,
+                        Tag = targetTag
+                    }, authCredentials, new Progress<JSONMessage>());
+                }
+                catch (Exception pullEx) when (IsAuthError(pullEx) && hasCredentials)
+                {
+                    _logger.LogWarning("Authenticated pull failed for {Image}, retrying anonymously", baseImageName);
+                    await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
+                    {
+                        FromImage = baseImageName,
+                        Tag = targetTag
+                    }, new AuthConfig(), new Progress<JSONMessage>());
+                }
+
                 var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{targetTag}");
 
                 var pulledImageId = pulledImageInformation.ID;
-                
+
                 var runningImageId = container.ImageID;
 
                 if (runningImageId != pulledImageId)
                 {
                     outdatedContainers.Add(container);
-                    
-                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}", 
+
+                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}",
                         baseImageName, pulledImageId);
                 }
                 else
                 {
-                    _logger.LogInformation("Container {Container} is already running the latest version ", containerName);
-                    
+                    _logger.LogInformation("Container {Container} is already running the latest version", containerName);
+
                     summary.UpToDate.Add(containerName);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "An unexpected error occurred while trying to pull {Image}. Aborting group update.", 
-                    baseImageName);
+                var friendlyMessage = IsAuthError(ex)
+                    ? "Authentication failed — check registry credentials"
+                    : ex.Message;
+
+                _logger.LogError(ex, "Failed to pull {Image}. Aborting group update.", baseImageName);
 
                 summary.FailedPulls.Add(new ContainerUpdateResult
                 {
                     ContainerName = containerName,
                     ImageName = baseImageName,
-                    ErrorMessage = ex.Message,
+                    ErrorMessage = friendlyMessage,
                     Success = false
                 });
 
@@ -267,14 +354,8 @@ public class DockerHelper
             
             var baseImageName = FetchBaseImageName(containerForUpdate.Image);
             
-            // Default tag in case of a misconfiguration by the user
-            var targetTag = "latest";
-                
-            if(containerForUpdate.Labels is not null && containerForUpdate.Labels.TryGetValue("com.mobysync.target-tag", out var targetTagParsed))
-            {
-                targetTag = targetTagParsed;
-            }
-            
+            var targetTag = ResolveTargetTag(containerForUpdate, baseImageName);
+
             var newContainerId = string.Empty;
             
             var originalName = containerForUpdate.Names.First().Replace("/", "");
@@ -473,12 +554,53 @@ public class DockerHelper
         }
     }
     
+    private string ResolveTargetTag(ContainerListResponse container, string baseImageName)
+    {
+        if (container.Labels != null && container.Labels.TryGetValue("com.mobysync.target-tag", out var labelTag))
+            return labelTag;
+
+        if (container.Labels != null
+            && container.Labels.TryGetValue("com.docker.compose.project", out var project)
+            && container.Labels.TryGetValue("com.docker.compose.service", out var service)
+            && _stackTagOverrides.TryGetValue($"{project}:{service}", out var stackTag))
+            return stackTag;
+
+        if (_imageTagOverrides.TryGetValue(baseImageName, out var imageTag))
+            return imageTag;
+
+        var detectedTag = ExtractTagFromImage(container.Image);
+        if (detectedTag != null)
+            return detectedTag;
+
+        return "latest";
+    }
+
+    private static bool IsPinnedVersionTag(string tag) =>
+        Regex.IsMatch(tag, @"^v?\d+(\.\d+)+$");
+
+    private static bool IsAuthError(Exception ex) =>
+        ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("forbidden", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ExtractTagFromImage(string imageFullPath)
+    {
+        var lastColonIndex = imageFullPath.LastIndexOf(':');
+        var lastSlashIndex = imageFullPath.LastIndexOf('/');
+
+        if (lastColonIndex > lastSlashIndex && lastColonIndex < imageFullPath.Length - 1)
+            return imageFullPath.Substring(lastColonIndex + 1);
+
+        return null;
+    }
+
     private string FetchBaseImageName(string imageFullPath)
     {
         var lastColonIndex = imageFullPath.LastIndexOf(':');
-        
+
         var lastSlashIndex = imageFullPath.LastIndexOf('/');
-        
+
         if (lastColonIndex > lastSlashIndex)
         {
             return imageFullPath.Substring(0, lastColonIndex);

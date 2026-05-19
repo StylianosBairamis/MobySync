@@ -7,58 +7,68 @@ namespace MobySync.Helpers;
 
 public class CredentialsHelper(ILogger<CredentialsHelper> logger)
 {
-    private readonly string _credentialsFileName = "config.json";
+    private readonly string _credentialsPath = Path.Combine("/app", "creds", "config.json");
 
-    private readonly string _credentialsDirectory = "creds";
-    
+    // Docker Hub credentials can be stored under several keys depending on which tool wrote config.json.
+    private static readonly string[] DockerHubKeys =
+    [
+        "https://index.docker.io/v1/", // Docker Desktop / docker login default
+        "registry-1.docker.io",        // Podman, some CI toolchains
+        "docker.io"                     // older Docker CLI versions
+    ];
+
     public async Task<AuthConfig> FetchCredentials(string baseImageName)
     {
-        var registryLoginUrl = "https://index.docker.io/v1/"; 
-        
-        var registryServerAddress = "docker.io";
-
         var parts = baseImageName.Split('/');
-        
-        // Registry detection
+
+        string registryServerAddress;
+        string[] lookupKeys;
+
         if (parts.Length > 1 && (parts[0].Contains('.') || parts[0].Contains(':')))
         {
-            registryLoginUrl = TryGetLoginUrlForRegistry(parts[0]); 
-            
             registryServerAddress = parts[0];
+            lookupKeys = [registryServerAddress];
         }
-        
-        var dockerConfigPath = Path.Combine("/app", _credentialsDirectory, _credentialsFileName);
-
-        if (!File.Exists(dockerConfigPath))
+        else
         {
-            logger.LogWarning("No credentials file could be fetched, proceeding anonymously");
-            
+            registryServerAddress = "docker.io";
+            lookupKeys = DockerHubKeys;
+        }
+
+        if (!File.Exists(_credentialsPath))
+        {
+            logger.LogDebug("No credentials file found at {Path} — pulling {Image} anonymously", _credentialsPath, baseImageName);
             return new AuthConfig();
         }
-        
-        return await ParseCredentialsFile(dockerConfigPath, registryLoginUrl, registryServerAddress);
+
+        return await ParseCredentialsFile(registryServerAddress, lookupKeys, baseImageName);
     }
 
-    private async Task<AuthConfig> ParseCredentialsFile(string credentialsFilePath, string registryLoginUrl, string registryServerAddress)
+    private async Task<AuthConfig> ParseCredentialsFile(string registryServerAddress, string[] lookupKeys, string baseImageName)
     {
         try
         {
-            var jsonString = await File.ReadAllTextAsync(credentialsFilePath);
+            var jsonString = await File.ReadAllTextAsync(_credentialsPath);
 
-            var serializationOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            
-            var config = JsonSerializer.Deserialize<RegistryCredentials>(jsonString, serializationOptions);
+            var config = JsonSerializer.Deserialize<RegistryCredentials>(jsonString,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            if (config?.Auths != null && config.Auths.TryGetValue(registryLoginUrl, out var authEntry))
+            if (config?.Auths != null)
             {
-                var decodedAuthBytes = Convert.FromBase64String(authEntry.Auth);
-                
-                var decodedAuthString = Encoding.UTF8.GetString(decodedAuthBytes);
-                
-                var splitIndex = decodedAuthString.IndexOf(':');
-                
-                if (splitIndex > 0)
+                foreach (var key in lookupKeys)
                 {
+                    if (!config.Auths.TryGetValue(key, out var authEntry))
+                        continue;
+
+                    var decodedAuthBytes = Convert.FromBase64String(authEntry.Auth);
+                    var decodedAuthString = Encoding.UTF8.GetString(decodedAuthBytes);
+                    var splitIndex = decodedAuthString.IndexOf(':');
+
+                    if (splitIndex <= 0)
+                        continue;
+
+                    logger.LogDebug("Found credentials for {Registry} (key: {Key})", registryServerAddress, key);
+
                     return new AuthConfig
                     {
                         ServerAddress = registryServerAddress,
@@ -67,27 +77,14 @@ public class CredentialsHelper(ILogger<CredentialsHelper> logger)
                     };
                 }
             }
+
+            logger.LogDebug("No credentials found for {Registry} — pulling {Image} anonymously", registryServerAddress, baseImageName);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "An unexpected error occured while trying to read docker config.json file");
+            logger.LogError(ex, "Failed to read credentials file — pulling {Image} anonymously", baseImageName);
         }
 
         return new AuthConfig();
-    }
-    
-    private string TryGetLoginUrlForRegistry(string registryDomain)
-    {
-        var knownAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { "docker.io", "https://index.docker.io/v1/" }, 
-        };
-
-        if (knownAliases.TryGetValue(registryDomain, out var specialAuthKey))
-        {
-            return specialAuthKey;
-        }
-
-        return registryDomain; 
     }
 }

@@ -8,11 +8,24 @@ services:
     environment:
       TZ: "Europe/Athens"
       API_KEY: "super-secret-key"
-      TEAMS_WEBHOOK_URL: ""
-      DISCORD_WEBHOOK_URL: "https://discordapp.com/api/webhooks/1493214492379840642/gKwMFvDN2oZ-rMfIst44bi3aATkPQsjEc6LfGVGb9x5Z_DN-GC-GYj_PQHP-6E5-yxHf"
+      # Comma-separated container names to skip (e.g. "db,redis"). All other running containers are monitored.
+      EXCLUDED_CONTAINERS: ""
+      # Discord embed webhook
+      DISCORD_WEBHOOK_URL: ""
+      # Generic JSON webhook (works with n8n, Zapier, custom endpoints, etc.)
+      WEBHOOK_URL: ""
+      # Set to "true" to remove dangling images from Docker after each update cycle
       PRUNE_IMAGES: "false"
+      # Optional: comma-separated tag overrides. Two formats:
+      #   stack:service:tag  → matches a specific Compose service  (e.g. memos:memos:stable)
+      #   image:tag          → matches any container using that image (e.g. neosmemo/memos:stable)
+      # Per-container labels (com.mobysync.target-tag) always take priority over these.
+      # Containers with no match fall back to "latest".
+      # IMAGE_TAG_OVERRIDES: "memos:memos:stable,neosmemo/memos:stable"
       UPDATE_HOUR: 23
       UPDATE_MINUTE: 30
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock      
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Optional: mount Docker credentials for private registries or authenticated DockerHub pulls.
+      # Remove or comment out if you only pull from public images.
       - ~/.docker/config.json:/app/creds/config.json:ro
