@@ -22,7 +22,9 @@ public class DockerHelper
 
     private readonly Dictionary<string, string> _imageTagOverrides;
 
-    public DockerHelper(ILogger<DockerHelper> logger, CredentialsHelper credentialsHelper)
+    private readonly RegistryHelper _registryHelper;
+
+    public DockerHelper(ILogger<DockerHelper> logger, CredentialsHelper credentialsHelper, RegistryHelper registryHelper)
     {
         var dockerSocketUri = new Uri("unix:///var/run/docker.sock");
 
@@ -31,6 +33,8 @@ public class DockerHelper
         _logger = logger;
 
         _credentialsHelper = credentialsHelper;
+
+        _registryHelper = registryHelper;
 
         _pruneImages = false;
 
@@ -241,12 +245,11 @@ public class DockerHelper
     private async Task<IList<ContainerListResponse>?> PullGroupImages(IList<ContainerListResponse> monitoredContainers, UpdateSummary summary)
     {
         var outdatedContainers = new List<ContainerListResponse>();
-        
+
         foreach (var container in monitoredContainers)
         {
             var baseImageName = FetchBaseImageName(container.Image);
             var containerName = container.Names.First().Replace("/", "");
-            
             var targetTag = ResolveTargetTag(container, baseImageName);
 
             if (IsPinnedVersionTag(targetTag))
@@ -280,7 +283,31 @@ public class DockerHelper
                 }
 
                 var authCredentials = await _credentialsHelper.FetchCredentials(baseImageName);
-                var hasCredentials = !string.IsNullOrEmpty(authCredentials.Username);
+
+                // Check the registry directly — bypasses the Docker daemon's credential cache entirely
+                var remoteDigest = await _registryHelper.GetManifestDigest(baseImageName, targetTag, authCredentials);
+
+                if (remoteDigest == null)
+                {
+                    _logger.LogWarning("Could not retrieve remote digest for {Image}:{Tag} — treating as up to date", baseImageName, targetTag);
+                    summary.UpToDate.Add(containerName);
+                    continue;
+                }
+
+                // Extract the sha256:... portion from each stored RepoDigest entry (format: image@sha256:...)
+                var runningDigests = runningImageInfo.RepoDigests
+                    .Where(d => d.Contains('@'))
+                    .Select(d => d.Split('@')[1])
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (runningDigests.Contains(remoteDigest))
+                {
+                    _logger.LogInformation("Container {Container} is already running the latest version", containerName);
+                    summary.UpToDate.Add(containerName);
+                    continue;
+                }
+
+                _logger.LogInformation("New image available for {Image}:{Tag} — pulling", baseImageName, targetTag);
 
                 try
                 {
@@ -290,35 +317,19 @@ public class DockerHelper
                         Tag = targetTag
                     }, authCredentials, new Progress<JSONMessage>());
                 }
-                catch (Exception pullEx) when (IsAuthError(pullEx) && hasCredentials)
+                catch (Exception pullEx) when (IsAuthError(pullEx))
                 {
-                    _logger.LogWarning("Authenticated pull failed for {Image}, retrying anonymously", baseImageName);
+                    // Daemon may be using its own stale cached credentials; retry with explicit empty auth
+                    _logger.LogWarning("Pull failed for {Image} (possible stale daemon credentials), retrying anonymously", baseImageName);
                     await _dockerClient.Images.CreateImageAsync(new ImagesCreateParameters
                     {
                         FromImage = baseImageName,
                         Tag = targetTag
-                    }, new AuthConfig(), new Progress<JSONMessage>());
+                    }, new AuthConfig { ServerAddress = authCredentials.ServerAddress }, new Progress<JSONMessage>());
                 }
 
-                var pulledImageInformation = await _dockerClient.Images.InspectImageAsync($"{baseImageName}:{targetTag}");
-
-                var pulledImageId = pulledImageInformation.ID;
-
-                var runningImageId = container.ImageID;
-
-                if (runningImageId != pulledImageId)
-                {
-                    outdatedContainers.Add(container);
-
-                    _logger.LogInformation("Successfully pulled new version for image: {Image}. New image ID: {ImageId}",
-                        baseImageName, pulledImageId);
-                }
-                else
-                {
-                    _logger.LogInformation("Container {Container} is already running the latest version", containerName);
-
-                    summary.UpToDate.Add(containerName);
-                }
+                _logger.LogInformation("Successfully pulled new version of {Image}:{Tag}", baseImageName, targetTag);
+                outdatedContainers.Add(container);
             }
             catch (Exception ex)
             {
@@ -326,7 +337,7 @@ public class DockerHelper
                     ? "Authentication failed — check registry credentials"
                     : ex.Message;
 
-                _logger.LogError(ex, "Failed to pull {Image}. Aborting group update.", baseImageName);
+                _logger.LogError(ex, "Failed to check or pull {Image}. Aborting group update.", baseImageName);
 
                 summary.FailedPulls.Add(new ContainerUpdateResult
                 {
@@ -339,7 +350,7 @@ public class DockerHelper
                 return null;
             }
         }
-        
+
         return outdatedContainers;
     }
     
