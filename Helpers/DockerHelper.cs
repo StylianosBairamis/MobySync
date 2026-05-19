@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using MobySync.Models;
 using Docker.DotNet;
 using Docker.DotNet.Models;
@@ -247,6 +248,19 @@ public class DockerHelper
             var containerName = container.Names.First().Replace("/", "");
             
             var targetTag = ResolveTargetTag(container, baseImageName);
+
+            if (IsPinnedVersionTag(targetTag))
+            {
+                _logger.LogInformation("Container {Container} uses pinned version tag ({Tag}), skipping", containerName, targetTag);
+                summary.Skipped.Add(new ContainerUpdateResult
+                {
+                    ContainerName = containerName,
+                    ImageName = baseImageName,
+                    ErrorMessage = $"Pinned version tag `{targetTag}` — skipping auto-update",
+                    Success = false
+                });
+                continue;
+            }
 
             try
             {
@@ -554,8 +568,15 @@ public class DockerHelper
         if (_imageTagOverrides.TryGetValue(baseImageName, out var imageTag))
             return imageTag;
 
+        var detectedTag = ExtractTagFromImage(container.Image);
+        if (detectedTag != null)
+            return detectedTag;
+
         return "latest";
     }
+
+    private static bool IsPinnedVersionTag(string tag) =>
+        Regex.IsMatch(tag, @"^v?\d+(\.\d+)+$");
 
     private static bool IsAuthError(Exception ex) =>
         ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
@@ -563,12 +584,23 @@ public class DockerHelper
         || ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("forbidden", StringComparison.OrdinalIgnoreCase);
 
+    private static string? ExtractTagFromImage(string imageFullPath)
+    {
+        var lastColonIndex = imageFullPath.LastIndexOf(':');
+        var lastSlashIndex = imageFullPath.LastIndexOf('/');
+
+        if (lastColonIndex > lastSlashIndex && lastColonIndex < imageFullPath.Length - 1)
+            return imageFullPath.Substring(lastColonIndex + 1);
+
+        return null;
+    }
+
     private string FetchBaseImageName(string imageFullPath)
     {
         var lastColonIndex = imageFullPath.LastIndexOf(':');
-        
+
         var lastSlashIndex = imageFullPath.LastIndexOf('/');
-        
+
         if (lastColonIndex > lastSlashIndex)
         {
             return imageFullPath.Substring(0, lastColonIndex);
