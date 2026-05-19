@@ -13,7 +13,7 @@ It monitors all running containers, pulls new images, and safely replaces them �
 - **Locally built image detection** — images with no registry digest are skipped without aborting other updates
 - **Dependency ordering** — define update order between containers via a label
 - **Atomic replacement with rollback** — if a new container crashes within 10 seconds, MobySync restores the backup automatically
-- **Private registry support** — reads Docker's `config.json` for credentials; retries anonymously if credentials fail on a public image
+- **Private registry support** — reads Docker's `config.json` for credentials; queries registries directly so the Docker daemon's cached credentials never interfere
 - **Notifications** — Discord embed webhook and/or a generic JSON webhook (works with n8n, Zapier, custom endpoints)
 - **Manual trigger** — REST API to kick off an update cycle on demand
 - **Image pruning** — optional cleanup of dangling images after each cycle
@@ -126,13 +126,23 @@ volumes:
   - ~/.docker/config.json:/app/creds/config.json:ro
 ```
 
-If this volume is absent, MobySync pulls anonymously. If credentials are present but a pull still fails with an auth error (e.g. stale Docker Hub token on a public image), MobySync automatically retries anonymously.
+If this volume is absent, MobySync checks and pulls anonymously. This is fine for all public registries — Docker Hub, `ghcr.io`, `lscr.io`, and others.
+
+### How auth works
+
+MobySync queries the **registry API directly** (not via the Docker daemon) to check whether an image has a new version. This means the Docker daemon's own cached or expired credentials never interfere — MobySync controls the authentication entirely.
+
+- **No credentials configured** → anonymous check and pull. Works for any public image.
+- **Credentials configured** → used for the registry check. If they fail (e.g. expired token), MobySync retries the check anonymously before reporting an error.
+- **Private image** → requires valid credentials in `config.json`. Anonymous fallback will fail with an auth error as expected.
+
+If you previously had to run `docker logout ghcr.io` to fix pull failures, you no longer need to — MobySync bypasses the daemon's credential cache.
 
 Supported credential key formats in `config.json`:
 - `https://index.docker.io/v1/` (Docker Desktop default)
 - `registry-1.docker.io` (Podman, some CI toolchains)
 - `docker.io` (older Docker CLI)
-- Any custom registry hostname (e.g. `ghcr.io`, `registry.mycompany.com`)
+- Any custom registry hostname (e.g. `ghcr.io`, `lscr.io`, `registry.mycompany.com`)
 
 ---
 
