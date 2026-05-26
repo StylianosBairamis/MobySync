@@ -172,7 +172,7 @@ Update Cycle Summary
 • portainer: latest
 
 ⏭️ Skipped
-• memos (neosmemo/memos): Pinned version tag '0.24.1' — skipping auto-update
+• memos (neosmemo/memos): Pinned version tag `0.24.1` — skipping auto-update
 • myapp (myapp/server): Locally built image — cannot check for updates
 
 Total duration: 01:32
@@ -186,8 +186,26 @@ All containers are up to date.
 `homepage`, `portainer`, `uptime-kuma`
 
 ⏭️ Skipped
-• memos (neosmemo/memos): Pinned version tag '0.24.1' — skipping auto-update
+• memos (neosmemo/memos): Pinned version tag `0.24.1` — skipping auto-update
 ```
+
+Example when a pull fails:
+
+```
+Update Cycle Summary
+❌ Failed Pulls
+• homeassistant: Registry check failed for ghcr.io/home-assistant/home-assistant:stable — credentials may be expired or image may be private
+• qbittorrent: Pull failed for lscr.io/linuxserver/qbittorrent:latest — daemon authentication error (tried both credentials and anonymous)
+
+⏭️ Skipped
+• memos (neosmemo/memos): Pinned version tag `0.24.1` — skipping auto-update
+
+Total duration: 00:08
+```
+
+Error messages in failed pulls distinguish between two failure points:
+- **Registry check failed** — MobySync could not fetch the remote manifest digest (network issue, expired credentials, or truly private image)
+- **Pull failed — daemon authentication error** — the registry check succeeded but the Docker daemon could not pull the image; MobySync already retried anonymously before reporting this
 
 ### Generic JSON Webhook
 
@@ -221,7 +239,9 @@ Set `WEBHOOK_URL` to receive structured JSON payloads. Works with n8n, Zapier, M
     { "container": "homepage", "image": "ghcr.io/gethomepage/homepage", "oldTag": "latest", "newTag": "latest" }
   ],
   "rollbacks": [],
-  "failedPulls": [],
+  "failedPulls": [
+    { "container": "homeassistant", "image": "ghcr.io/home-assistant/home-assistant", "reason": "Registry check failed for ghcr.io/home-assistant/home-assistant:stable — credentials may be expired or image may be private" }
+  ],
   "skipped": [
     { "container": "memos", "image": "neosmemo/memos", "reason": "Pinned version tag '0.24.1' — skipping auto-update" }
   ],
