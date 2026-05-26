@@ -1,35 +1,36 @@
 # MobySync
 
-MobySync is a lightweight Docker image auto-updater designed for home labs and production environments.
-It monitors all running containers, pulls new images, and safely replaces them — respecting dependency chains, rolling back on failure, and notifying you on every cycle.
+**MobySync** is a lightweight, high-performance Docker container auto-updater designed for home labs and production environments. It monitors your running containers, intelligently pulls new images, and safely replaces containers while respecting dependency chains and providing automated rollbacks on failure.
+
+Built with .NET 8, MobySync is designed to be a "set-and-forget" solution for keeping your Docker stack up-to-date with minimal manual intervention.
 
 ---
 
 ## Key Features
 
-- **Opt-out monitoring** — all running containers are watched by default; exclude what you don't want touched
-- **Scheduled updates** — runs once a day at a time and timezone you choose
-- **Pinned version detection** — containers on tags like `16.3` or `v1.2.3` are automatically skipped
-- **Locally built image detection** — images with no registry digest are skipped without aborting other updates
-- **Dependency ordering** — define update order between containers via a label
-- **Atomic replacement with rollback** — if a new container crashes within 10 seconds, MobySync restores the backup automatically
-- **Private registry support** — reads Docker's `config.json` for credentials; queries registries directly so the Docker daemon's cached credentials never interfere
-- **Notifications** — Discord embed webhook and/or a generic JSON webhook (works with n8n, Zapier, custom endpoints)
-- **Manual trigger** — REST API to kick off an update cycle on demand
-- **Image pruning** — optional cleanup of dangling images after each cycle
+- **Safety First:** Automatic rollback to the previous container state if an update fails or if the new container crashes within 10 seconds of starting.
+- **Dependency Awareness:** Respects container dependencies (via labels) to ensure services update in the correct order (e.g., Database before Web App).
+- **Flexible Scheduling:** Define exactly when updates should occur using Cron-like hour/minute settings and Timezone support.
+- **Registry Support:** Seamlessly handles private registries using your existing Docker `config.json`.
+- **Smart Tag Tracking:** Track specific tags (`latest`, `stable`, etc.) per container.
+- **Rich Notifications:** Native support for Discord webhooks and generic JSON webhooks for startup, start-of-cycle, and detailed summaries.
+- **Housekeeping:** Optional automatic pruning of old images after a successful update cycle.
+- **Manual Triggers:** REST API endpoint to force an update cycle instantly, protected by API Key authentication.
+- **Fine-grained Control:** Exclude specific containers or override tags globally or per-service.
 
 ---
 
-## How Monitoring Works
+## How It Works
 
-MobySync monitors **all running containers** except:
-
-1. Itself (detected automatically — no configuration needed)
-2. Containers listed in `EXCLUDED_CONTAINERS`
-3. Containers using a **locally built image** (no registry digest — skipped with a note in the summary)
-4. Containers on a **pinned version tag** like `16.3`, `18.3.1`, or `v2.1.0` (skipped automatically)
-
-Floating tags like `latest`, `stable`, `edge`, and `nightly` are updated normally.
+1. **Discovery:** MobySync scans for all running containers, excluding itself and any containers specified in `EXCLUDED_CONTAINERS`.
+2. **Dependency Mapping:** It builds a dependency graph using the `com.mobysync.depends-on` label to determine the safe update order.
+3. **Image Verification:** For each monitored container, it checks for a newer version of the image on the registry.
+4. **The Update Cycle:**
+   - Stops and renames the old container to a backup name.
+   - Pulls the new image (respecting credentials).
+   - Creates and starts a new container with the exact same configuration.
+   - **Health Check:** Waits 10 seconds to ensure the new container doesn't crash.
+5. **Finalization:** On success, the backup container is removed. On failure, MobySync automatically performs a rollback of the current group to ensure system stability.
 
 ---
 
@@ -37,221 +38,32 @@ Floating tags like `latest`, `stable`, `edge`, and `nightly` are updated normall
 
 ### Environment Variables
 
-| Variable | Required | Description | Default |
-| :--- | :---: | :--- | :--- |
-| `API_KEY` | Yes | Secret key for the manual-trigger API | — |
-| `UPDATE_HOUR` | | Hour of day to run updates (0–23) | `23` |
-| `UPDATE_MINUTE` | | Minute of hour to run updates (0–59) | `30` |
-| `TZ` | | IANA timezone for the schedule (e.g. `Europe/London`) | `UTC` |
-| `EXCLUDED_CONTAINERS` | | Comma-separated container names to never touch | — |
-| `IMAGE_TAG_OVERRIDES` | | Force a specific tag for an image or Compose service (see below) | — |
-| `PRUNE_IMAGES` | | Set to `true` to remove dangling images after each cycle | `false` |
-| `DISCORD_WEBHOOK_URL` | | Discord embed webhook URL | — |
-| `WEBHOOK_URL` | | Generic JSON webhook URL | — |
-
-### Excluding Containers
-
-```yaml
-EXCLUDED_CONTAINERS: "db,redis,my-custom-app"
-```
-
-Any container whose name exactly matches one of these values (case-insensitive) will never be touched.
-
-### Tag Resolution Order
-
-For each container, MobySync resolves which tag to track using this priority:
-
-1. **`com.mobysync.target-tag` label** on the container
-2. **Stack override** in `IMAGE_TAG_OVERRIDES` (`project:service:tag` format)
-3. **Image override** in `IMAGE_TAG_OVERRIDES` (`image:tag` format)
-4. **Auto-detected** from the running container's image string (e.g. `neosmemo/memos:stable` → `stable`)
-5. **`latest`** as a last resort
-
-In most cases you don't need to configure anything — MobySync reads the tag the container is already running.
-
-### IMAGE_TAG_OVERRIDES
-
-Use this only when you want to **change** which tag a container tracks (e.g. migrate from `stable` to `latest`). Two formats are supported:
-
-```yaml
-# project:service:tag  — targets a specific Compose service
-# image:tag            — targets any container using that base image
-IMAGE_TAG_OVERRIDES: "mystack:memos:latest,neosmemo/memos:latest"
-```
-
-Per-container labels always take priority over overrides.
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `API_KEY` | **(Required)** Secret key for API authentication | - |
+| `UPDATE_HOUR` | Hour of the day to run updates (0-23) | `23` |
+| `UPDATE_MINUTE` | Minute of the hour to run updates (0-59) | `30` |
+| `TZ` | Timezone for the update schedule (e.g., `Europe/London`) | `UTC` |
+| `PRUNE_IMAGES` | Set to `true` to remove old images after updates | `false` |
+| `EXCLUDED_CONTAINERS`| Comma-separated list of container names to ignore | - |
+| `IMAGE_TAG_OVERRIDES`| Global tag overrides (see [Advanced Configuration](#advanced-configuration)) | - |
+| `DISCORD_WEBHOOK_URL`| URL for Discord notifications | - |
+| `WEBHOOK_URL` | URL for generic JSON webhook notifications | - |
 
 ### Container Labels
 
+By default, MobySync monitors **all running containers**. You can use labels to fine-tune update behavior:
+
 | Label | Description | Example |
 | :--- | :--- | :--- |
-| `com.mobysync.target-tag` | Pin this container to a specific tag | `stable` |
-| `com.mobysync.depends-on` | Comma-separated containers that must update first | `db,redis` |
-
-**Example — Compose service that must update after its database:**
-
-```yaml
-services:
-  db:
-    image: postgres:16
-    labels:
-      com.mobysync.target-tag: "16"
-
-  app:
-    image: myapp/server:latest
-    labels:
-      com.mobysync.depends-on: "db"
-```
-
----
-
-## What Gets Skipped (and Why)
-
-MobySync adds skipped containers to the notification summary so you always have the full picture.
-
-| Scenario | Reason shown in notification |
-| :--- | :--- |
-| Container uses a locally built image | `Locally built image — cannot check for updates` |
-| Container tag is a pinned version (`16.3`, `v1.2.3`) | `Pinned version tag '16.3' — skipping auto-update` |
-| Listed in `EXCLUDED_CONTAINERS` | Never appears — excluded before the cycle starts |
-
----
-
-## Private Registries & Credentials
-
-Mount your Docker credentials file to give MobySync access to private registries or authenticated Docker Hub pulls:
-
-```yaml
-volumes:
-  - ~/.docker/config.json:/app/creds/config.json:ro
-```
-
-If this volume is absent, MobySync checks and pulls anonymously. This is fine for all public registries — Docker Hub, `ghcr.io`, `lscr.io`, and others.
-
-### How auth works
-
-MobySync queries the **registry API directly** (not via the Docker daemon) to check whether an image has a new version. This means the Docker daemon's own cached or expired credentials never interfere — MobySync controls the authentication entirely.
-
-- **No credentials configured** → anonymous check and pull. Works for any public image.
-- **Credentials configured** → used for the registry check. If they fail (e.g. expired token), MobySync retries the check anonymously before reporting an error.
-- **Private image** → requires valid credentials in `config.json`. Anonymous fallback will fail with an auth error as expected.
-
-If you previously had to run `docker logout ghcr.io` to fix pull failures, you no longer need to — MobySync bypasses the daemon's credential cache.
-
-Supported credential key formats in `config.json`:
-- `https://index.docker.io/v1/` (Docker Desktop default)
-- `registry-1.docker.io` (Podman, some CI toolchains)
-- `docker.io` (older Docker CLI)
-- Any custom registry hostname (e.g. `ghcr.io`, `lscr.io`, `registry.mycompany.com`)
-
----
-
-## Notifications
-
-MobySync sends a notification at three points during its lifecycle:
-
-| Event | Description |
-| :--- | :--- |
-| **Startup** | Sent once on boot to confirm the webhook is working |
-| **Cycle started** | Sent at the beginning of each update cycle |
-| **Cycle summary** | Sent at the end with full results — always fires, even when nothing changed |
-
-### Discord
-
-Set `DISCORD_WEBHOOK_URL` to receive color-coded embeds:
-- **Blue** — cycle starting or no changes found
-- **Green** — all updates succeeded
-- **Red** — one or more rollbacks or failed pulls
-
-Example summary embed when updates are found:
-
-```
-Update Cycle Summary
-✅ Successful Updates
-• homepage: latest
-• portainer: latest
-
-⏭️ Skipped
-• memos (neosmemo/memos): Pinned version tag `0.24.1` — skipping auto-update
-• myapp (myapp/server): Locally built image — cannot check for updates
-
-Total duration: 01:32
-```
-
-Example when nothing changed:
-
-```
-Update Cycle Complete
-All containers are up to date.
-`homepage`, `portainer`, `uptime-kuma`
-
-⏭️ Skipped
-• memos (neosmemo/memos): Pinned version tag `0.24.1` — skipping auto-update
-```
-
-Example when a pull fails:
-
-```
-Update Cycle Summary
-❌ Failed Pulls
-• homeassistant: Registry check failed for ghcr.io/home-assistant/home-assistant:stable — credentials may be expired or image may be private
-• qbittorrent: Pull failed for lscr.io/linuxserver/qbittorrent:latest — daemon authentication error (tried both credentials and anonymous)
-
-⏭️ Skipped
-• memos (neosmemo/memos): Pinned version tag `0.24.1` — skipping auto-update
-
-Total duration: 00:08
-```
-
-Error messages in failed pulls distinguish between two failure points:
-- **Registry check failed** — MobySync could not fetch the remote manifest digest (network issue, expired credentials, or truly private image)
-- **Pull failed — daemon authentication error** — the registry check succeeded but the Docker daemon could not pull the image; MobySync already retried anonymously before reporting this
-
-### Generic JSON Webhook
-
-Set `WEBHOOK_URL` to receive structured JSON payloads. Works with n8n, Zapier, Make, or any custom endpoint.
-
-**Startup payload:**
-```json
-{
-  "event": "startup",
-  "timestamp": "2026-05-19T20:00:00Z",
-  "message": "MobySync started. Webhook is configured and working."
-}
-```
-
-**Cycle started payload:**
-```json
-{
-  "event": "update_started",
-  "timestamp": "2026-05-19T23:30:00Z",
-  "message": "Update cycle starting. Checking all containers for new images."
-}
-```
-
-**Cycle summary payload:**
-```json
-{
-  "event": "update_cycle",
-  "timestamp": "2026-05-19T23:31:32Z",
-  "durationSeconds": 92,
-  "successes": [
-    { "container": "homepage", "image": "ghcr.io/gethomepage/homepage", "oldTag": "latest", "newTag": "latest" }
-  ],
-  "rollbacks": [],
-  "failedPulls": [
-    { "container": "homeassistant", "image": "ghcr.io/home-assistant/home-assistant", "reason": "Registry check failed for ghcr.io/home-assistant/home-assistant:stable — credentials may be expired or image may be private" }
-  ],
-  "skipped": [
-    { "container": "memos", "image": "neosmemo/memos", "reason": "Pinned version tag '0.24.1' — skipping auto-update" }
-  ],
-  "upToDate": ["portainer", "uptime-kuma"]
-}
-```
+| `com.mobysync.target-tag` | The specific tag to track | `latest` or `1.2-stable` |
+| `com.mobysync.depends-on` | Comma-separated list of container names this depends on | `db, redis` |
 
 ---
 
 ## Deployment
+
+### Docker Compose
 
 ```yaml
 services:
@@ -261,36 +73,43 @@ services:
     restart: unless-stopped
     ports:
       - "5080:5080"
-    environment:
-      TZ: "Europe/Athens"
-      API_KEY: "super-secret-key"
-      # Comma-separated container names to never touch
-      EXCLUDED_CONTAINERS: "db,redis"
-      # Discord embed webhook
-      DISCORD_WEBHOOK_URL: ""
-      # Generic JSON webhook (n8n, Zapier, custom endpoints)
-      WEBHOOK_URL: ""
-      # Set to "true" to remove dangling images after each cycle
-      PRUNE_IMAGES: "false"
-      # Force a tag override when auto-detection isn't enough:
-      #   project:service:tag  or  image:tag
-      # IMAGE_TAG_OVERRIDES: "mystack:memos:latest,neosmemo/memos:latest"
-      UPDATE_HOUR: 23
-      UPDATE_MINUTE: 30
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Optional: mount Docker credentials for private registries.
-      # Remove if you only pull from public images.
+      # Optional: mount Docker credentials for private registries
       - ~/.docker/config.json:/app/creds/config.json:ro
+    environment:
+      - API_KEY=your_secure_random_key
+      - UPDATE_HOUR=03
+      - UPDATE_MINUTE=00
+      - TZ=Europe/Athens
+      - PRUNE_IMAGES=true
+      - DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+      - EXCLUDED_CONTAINERS=portainer,nginx-proxy
 ```
+
+---
+
+## Advanced Configuration
+
+### Tag Overrides
+You can override tags globally or for specific docker-compose services using the `IMAGE_TAG_OVERRIDES` environment variable. 
+
+> **Note:** Per-container labels (`com.mobysync.target-tag`) always take priority over these overrides. Containers with no match fall back to `latest`.
+
+**Format:** `project:service:tag,image_name:tag`
+
+- `my-stack:web:beta`: Overrides the `web` service in the `my-stack` project to use the `beta` tag.
+- `nginx:alpine`: Overrides any container using the `nginx` image to use the `alpine` tag.
+
+### Exclusions
+By default, MobySync excludes itself. You can add more containers to the exclusion list using `EXCLUDED_CONTAINERS=container1,container2`.
 
 ---
 
 ## API Reference
 
 ### Trigger Manual Update
-
-Immediately starts a full update cycle in the background.
+Instantly starts an update cycle.
 
 - **URL:** `POST /api/update/trigger`
 - **Header:** `X-API-KEY: <your API_KEY>`
@@ -308,6 +127,18 @@ Immediately starts a full update cycle in the background.
 curl -X POST http://localhost:5080/api/update/trigger \
   -H "X-API-KEY: super-secret-key"
 ```
+
+---
+
+## Notifications
+
+### Discord
+Provides rich embeds showing exactly what was updated, what was skipped, and any errors encountered.
+
+### Generic Webhook
+Sends a POST request with a JSON payload. Useful for integrating with Home Assistant, Gotify, or custom dashboards.
+
+**Events sent:** `startup`, `update_started`, `update_cycle`.
 
 ---
 
